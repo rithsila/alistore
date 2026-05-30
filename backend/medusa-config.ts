@@ -2,6 +2,15 @@ import { loadEnv, defineConfig } from '@medusajs/framework/utils'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
+const jwtSecret = process.env.JWT_SECRET
+const cookieSecret = process.env.COOKIE_SECRET
+
+if (!jwtSecret || !cookieSecret) {
+  throw new Error(
+    "JWT_SECRET and COOKIE_SECRET must be set (use long, unpredictable values, e.g. `openssl rand -base64 48`)."
+  )
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -9,8 +18,8 @@ module.exports = defineConfig({
       storeCors: process.env.STORE_CORS!,
       adminCors: process.env.ADMIN_CORS!,
       authCors: process.env.AUTH_CORS!,
-      jwtSecret: process.env.JWT_SECRET || "supersecret",
-      cookieSecret: process.env.COOKIE_SECRET || "supersecret",
+      jwtSecret,
+      cookieSecret,
     }
   }
 })
