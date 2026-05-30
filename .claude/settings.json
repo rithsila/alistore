@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "medusa-dev@medusa": true,
+    "learn-medusa@medusa": true
+  }
+}
