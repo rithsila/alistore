@@ -1,0 +1,89 @@
+# Supply-chain audit — SETUP-01B
+#
+# Gate policy: fail the build on any high- or critical-severity advisory in the
+# backend dependency tree, EXCEPT advisories explicitly allowlisted below (each
+# must have a reviewed entry in docs/npm-audit-exceptions.md). This lets a newly
+# introduced high advisory fail CI while the accepted, non-exploitable baseline
+# (e.g. the Medusa 2.15.3 `uuid` chain, GHSA-w5hq-g745-h8pq) does not.
+#
+# No extra dependency is used: `npm audit --json` is filtered by an inline Node
+# script. Install is `npm ci` only (never `npm install`) so the committed
+# lockfile is the single source of truth.
+#
+# Activation: GitHub Actions auto-discovers workflows only under
+# .github/workflows/. To enable, reference this file from there, e.g.
+# .github/workflows/audit.yml:
+#   on: [push, pull_request]
+#   jobs:
+#     audit: { uses: ./ci/audit.yml }
+# (see docs/supply-chain.md → "Activating the CI audit").
+
+name: supply-chain-audit
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-backend:
+    name: npm audit (backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install (locked)
+        run: npm ci
+
+      - name: Audit (fail on non-allowlisted high/critical)
+        run: |
+          # Allowlist of reviewed advisories (GHSA ids). Each MUST have a
+          # documented justification in docs/npm-audit-exceptions.md.
+          cat > .audit-allowlist.json <<'EOF'
+          ["GHSA-w5hq-g745-h8pq"]
+          EOF
+
+          # npm audit exits non-zero when findings exist; capture regardless.
+          npm audit --json > .audit.json || true
+
+          node <<'EOF'
+          const fs = require("fs");
+          const allow = new Set(JSON.parse(fs.readFileSync(".audit-allowlist.json", "utf8")));
+          const report = JSON.parse(fs.readFileSync(".audit.json", "utf8"));
+          const GATED = new Set(["high", "critical"]);
+          const ghsa = (url) => (String(url || "").match(/GHSA-[\w-]+/) || [null])[0];
+
+          const blocking = [];
+          for (const [pkg, v] of Object.entries(report.vulnerabilities || {})) {
+            for (const via of v.via || []) {
+              if (typeof via !== "object") continue;
+              if (!GATED.has(via.severity)) continue;
+              const id = ghsa(via.url);
+              if (id && allow.has(id)) continue;
+              blocking.push(`${pkg}: ${via.severity} ${id || via.title || via.source}`);
+            }
+          }
+
+          const m = (report.metadata && report.metadata.vulnerabilities) || {};
+          console.log(`audit totals: high=${m.high || 0} critical=${m.critical || 0} (allowlisted: ${[...allow].join(", ") || "none"})`);
+
+          if (blocking.length) {
+            console.error("\nBlocking high/critical advisories (not allowlisted):");
+            for (const b of [...new Set(blocking)]) console.error("  - " + b);
+            console.error("\nReview and either fix, or add a documented exception to docs/npm-audit-exceptions.md and the allowlist.");
+            process.exit(1);
+          }
+          console.log("No non-allowlisted high/critical advisories. Gate passed.");
+          EOF

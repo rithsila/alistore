@@ -268,6 +268,152 @@ at `http://localhost:9000/app`.
 
 ---
 
+## Step 10 — Install Redis (event bus, cache, workflows)
+
+Medusa uses **Redis** for three things: its event bus, its cache, and its
+workflow engine. Without Redis, Medusa falls back to slower in-memory
+versions that are **not safe for production** (events and background jobs
+are lost on restart, and they cannot be shared across processes).
+
+We install Redis on the **same `alistore-db` container** as PostgreSQL.
+Run everything below **inside the database container's console** (the same
+black terminal you used for Postgres), logged in as `root`.
+
+### 10a. Install Redis
+
+```bash
+apt install -y redis-server
+```
+
+Check the version (Medusa works with Redis 6+):
+
+```bash
+redis-server --version
+```
+
+### 10b. Harden the Redis config
+
+Open the config file:
+
+```bash
+nano /etc/redis/redis.conf
+```
+
+Change these settings. Use **search** in `nano` (`Ctrl+W`) to find each
+line, then edit it. Lines may start with a `#` (commented out) — remove the
+`#` to activate them.
+
+1. **(Testing) Listen on all interfaces** so you can connect from any
+   machine while developing. Find the `bind` line and set:
+
+   ```
+   bind 0.0.0.0
+   ```
+
+   > ⚠️ **Testing only.** Before go-live, lock this down to localhost + the
+   > container's LAN IP: `bind 127.0.0.1 172.16.18.10`.
+
+2. **(Testing) Allow authenticated remote connections.** Because we bind to
+   all interfaces for testing, turn protected mode off — the password below
+   still protects Redis:
+
+   ```
+   protected-mode no
+   ```
+
+   > ⚠️ **Testing only.** Set `protected-mode yes` again before go-live.
+
+3. **Require a password.** For testing we reuse the same password as the
+   database. It must match the `REDIS_URL` value in `backend/.env`:
+
+   ```
+   requirepass DbNew!2025
+   ```
+
+   > ⚠️ **Testing only.** Use a unique, strong Redis password before
+   > go-live, and update `REDIS_URL` in `backend/.env` to match.
+
+4. **Persist data to disk** so events and workflow state survive a restart.
+   Turn on the append-only file:
+
+   ```
+   appendonly yes
+   ```
+
+5. **Cap memory and protect important keys.** A small store is fine with
+   256 MB. Use `noeviction` so Redis never silently drops event/workflow
+   data when full (it returns an error instead, which is the safe choice):
+
+   ```
+   maxmemory 256mb
+   maxmemory-policy noeviction
+   ```
+
+Save and exit: `Ctrl+O`, `Enter`, `Ctrl+X`.
+
+> **Why a password is essential:** because Redis now listens on the LAN
+> (`172.16.18.10`), any machine on the network could otherwise read or wipe
+> it. `requirepass` + a private-only `bind` keeps it locked down.
+
+### 10c. Restart Redis and enable it on boot
+
+```bash
+systemctl restart redis-server
+systemctl enable redis-server
+systemctl status redis-server
+```
+
+You should see **active (running)** in green. Press `q` to exit.
+
+### 10d. Firewall
+
+**(Testing)** Allow Redis (`6379`) from anywhere so you can connect from any
+machine while developing:
+
+```bash
+ufw allow 6379/tcp
+```
+
+> ⚠️ **Testing only.** Before go-live, replace this with a rule scoped to the
+> backend IP only, exactly like the Postgres rule:
+>
+> ```bash
+> ufw delete allow 6379/tcp
+> ufw allow from 172.16.18.20 to any port 6379 proto tcp
+> ```
+
+### 10e. Test Redis
+
+On the container itself:
+
+```bash
+redis-cli -a 'DbNew!2025' ping
+```
+
+You should see `PONG`. (Ignore the warning about using `-a` on the command
+line; it is only a reminder that the password is visible in your shell
+history on this admin box.)
+
+### 10f. Turn it on in the backend
+
+The backend is already wired for Redis in `medusa-config.ts` — it activates
+automatically as soon as `REDIS_URL` is set. In `backend/.env`, **uncomment**
+the `REDIS_URL` line (remove the leading `#`):
+
+```
+REDIS_URL=redis://:DbNew!2025@172.16.18.10:6379
+```
+
+Then restart the backend (`npm run dev`). On boot you should **no longer**
+see `redisUrl not found. A fake redis instance will be used.` — instead the
+Redis-backed event bus, cache, and workflow engine load.
+
+> **Never commit `backend/.env`.** For testing this guide uses the shared
+> `DbNew!2025` password; before go-live, give Redis its own strong password,
+> keep it only in `backend/.env`, and rotate it.
+
+---
+
 ## Quick reference
 
 | Item           | Value (example)                                         |
@@ -277,8 +423,11 @@ at `http://localhost:9000/app`.
 | Backend IP     | `172.16.18.20`                                        |
 | Database name  | `medusa`                                              |
 | Database user  | `db-admin`                                            |
-| Port           | `5432`                                                |
+| Postgres port  | `5432`                                                |
 | DATABASE_URL   | `postgres://db-admin:DbNew!2025@172.16.18.10:5432/medusa` |
+| Redis port     | `6379`                                                |
+| Redis password | `DbNew!2025` (testing — change before go-live)        |
+| REDIS_URL      | `redis://:DbNew!2025@172.16.18.10:6379`               |
 
 ---
 

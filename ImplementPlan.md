@@ -31,16 +31,18 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 ## Phase 1 — SETUP
 
-### SETUP-01: Initialize Medusa v2 backend (pinned stable)
+### ✅ SETUP-01: Initialize Medusa v2 backend (pinned stable)
 
+- **Completed 2026-05-31**: Backend scaffolded; all `@medusajs/*` pinned exact `2.15.3`; `medusa develop` boots (port 9000); DB (`172.16.18.10:5432/medusa`, PG 18.4) + Redis (`172.16.18.10:6379`) connect; `/app` reachable; admin user created and authenticates. ⚠️ Criterion 4 (MFA enrollment screen) DEFERRED — the OSS `@medusajs/dashboard@2.15.3` bundle ships no TOTP/2FA enrollment UI, contradicting the "MFA-capable patch" premise. Tracked as follow-up `SETUP-01C` (verify whether admin MFA needs a plugin / custom module / Medusa Cloud).
 - **Objective**: Create the Medusa backend project skeleton on a pinned stable version.
 - **Requirements**: Run `npx create-medusa-app@latest backend` to scaffold, then **pin every `@medusajs/*` dependency to exact `2.15.3`** (no `^`/`~`) — this is the MFA-capable patch and is still outside the post-v2.13.6 migration-bug window. Verify the version on install. Node 20 LTS. Skip the bundled storefront. Commit base + lockfile.
 - **Dependencies**: None
 - **Deliverables**: `backend/` (incl. `medusa-config.ts`, `package.json`, `package-lock.json`)
 - **Acceptance Criteria**: `package.json` shows exact `2.15.3` for all `@medusajs/*`; `npx medusa develop` boots; admin reachable at `/app`; MFA enrollment screen accessible for the admin user.
 
-### SETUP-01B: Supply-chain hardening policy
+### ✅ SETUP-01B: Supply-chain hardening policy
 
+- **Completed 2026-05-31**: `backend/.npmrc` has `save-exact=true`; all backend `package.json` deps pinned exact (no `^`/`~`, incl. `overrides`); `ci/audit.yml` added (allowlist-aware `npm audit` gate, fails on non-allowlisted high/critical — validated); `docs/supply-chain.md` policy added. NOTE: baseline tree has high advisories beyond the documented `uuid` one (e.g. `@mikro-orm/knex`, `@opentelemetry/exporter-prometheus`) — triage into `docs/npm-audit-exceptions.md` is follow-up security work. Storefront pinning deferred until it's scaffolded.
 - **Objective**: Reduce npm supply-chain attack risk across both repos.
 - **Requirements**: Pin all deps to exact versions (no `^`/`~`); commit lockfiles; use `npm ci` everywhere (CI + server), never `npm install` in deploy; adopt a ~7–14 day cooldown before bumping to any newly published version; run `npm audit` in CI and fail on high/critical; review `bakong-khqr` source and vendor its QR logic into `src/modules/bakong-payment/` rather than depending on it live; keep dependency count minimal.
 - **Dependencies**: SETUP-01

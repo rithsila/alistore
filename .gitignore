@@ -12,7 +12,7 @@ Thumbs.db
 .vscode/
 .antigravitycli/
 .antigravity/
-
+Credentials.md
 # ---- Node ----
 node_modules/
 **/node_modules/
