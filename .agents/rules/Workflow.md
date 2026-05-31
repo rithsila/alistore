@@ -9,12 +9,12 @@ This project follows three documents and an explicit task list. Read them before
 * ALWAYS read `ImplementPlan.md` to find the exact task spec by ID (`SETUP-XX` / `BACKEND-XX` / `FRONTEND-XX` / `INTEGRATION-XX` / `TEST-XX`).
 * ALWAYS implement only what the task's `Requirements` and `Deliverables` specify — no extra features, no opportunistic refactors.
 * If the spec is ambiguous, contradicts PRD/Design, or depends on a `⚠️ CLARIFY` item that's still open, **STOP and ask** before guessing. Never guess on payments, auth, or schema.
-* Treat the "Resolved decisions (locked)" section of `ImplementPlan.md` as hard constraints (coral `#C0461F`, English-first v1, env-based exchange rate, Individual KHQR, Supabase-dev / Proxmox-prod, VAT 10% off-by-default, Medusa `2.15.3` pinned with admin MFA required).
+* Treat the "Resolved decisions (locked)" section of `ImplementPlan.md` as hard constraints (coral `#C0461F`, English-first v1, env-based exchange rate, Individual KHQR, Proxmox UAT/dev DB is agent-migratable (Supabase-dev retired), VAT 10% off-by-default, Medusa `2.15.3` pinned with admin MFA required).
 
 ## During task execution
 
 * Use the relevant skill or tool (Medusa MCP, etc.) for conventions when available.
-* **Generate migration files only — never run `npx medusa db:migrate` against a non-dev database from this agent.** Production migrations are run by a human after review.
+* **The agent MAY run `db:generate` and `db:migrate` against the UAT/dev database** (the LAN Proxmox host in `DATABASE_URL`). **Never run `db:migrate`/`db:reset`/`db:rollback` against real production** — those are run by a human after review + backup.
 * Never run destructive commands (`db:reset`, `drop`, `rm -rf`) without explicit per-task approval.
 * Do NOT modify files outside the task's declared `Deliverables` list.
 * Honor the locked tech stack and pinned versions (see `stack.md`). No new dependencies without explicit approval.

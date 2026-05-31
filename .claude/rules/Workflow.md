@@ -14,7 +14,7 @@ This project follows three documents and an explicit task list. Read them before
 ## During task execution
 
 * Use the relevant skill or tool (Medusa MCP, etc.) for conventions when available.
-* **Generate migration files only — never run `npx medusa db:migrate` against a non-dev database from this agent.** Production migrations are run by a human after review.
+* **The agent MAY run `db:generate` and `db:migrate` against the UAT/dev database** (the LAN Proxmox host in `DATABASE_URL`). **Never run `db:migrate`/`db:reset`/`db:rollback` against real production** — those are run by a human after review + backup.
 * Never run destructive commands (`db:reset`, `drop`, `rm -rf`) without explicit per-task approval.
 * Do NOT modify files outside the task's declared `Deliverables` list.
 * Do NOT install any package npm, pi, etc that users under 100.

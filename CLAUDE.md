@@ -23,7 +23,7 @@ Two separate repos:
 
 ```
 Customer phone → shop.<domain> (Vercel/Next.js) → Medusa backend (Proxmox VM)
-                                                    ├── PostgreSQL (Supabase dev / Proxmox prod)
+                                                    ├── PostgreSQL (Proxmox VM — UAT/dev + prod)
                                                     ├── Redis (Proxmox prod / in-memory dev)
                                                     ├── Cloudflare R2 (images via img.<domain>)
                                                     ├── Bakong KHQR (via in-Cambodia proxy)

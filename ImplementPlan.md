@@ -15,7 +15,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **CLARIFY-02 ✅** — **English-first for v1.** UI chrome + categories in English; font stack is Latin-only (Inter + Bebas Neue). Khmer UI + Khmer font deferred to **v2**. → FRONTEND-02, SETUP-09, FRONTEND-07.
 - **CLARIFY-03 ✅ (mechanism)** — Exchange rate via env var `USD_KHR_RATE` for v1 (admin-editable deferred to v2). Rate *value* to be provided later; build proceeds with a placeholder. → BACKEND-01.
 - **CLARIFY-05 ✅** — Individual KHQR confirmed (type). Real `bank_account`, dev/prod `BAKONG_TOKEN`, and `BAKONG_PROXY_URL` are deploy-time secrets kept only in `.env` (never committed); proxy host added to the SSRF allowlist at deploy. BACKEND-03 builds against the sandbox until provided. → BACKEND-03.
-- **CLARIFY-07 ✅** — Dev: Supabase free tier. **Production: Postgres on the Proxmox VM** (co-located with backend; avoids Supabase free-tier auto-pause). Both via one `DATABASE_URL`. → SETUP-02.
+- **CLARIFY-07 ✅** — Postgres on the Proxmox VM for both **UAT/dev** and production (co-located with backend; Supabase free tier retired to avoid auto-pause). One `DATABASE_URL` per environment; the agent may migrate the UAT/dev DB. → SETUP-02.
 - **CLARIFY-10 ✅** — VAT = 10% (Cambodia standard), wired but **off** in v1. TIN provided when enabling. → BACKEND-06.
 - **CLARIFY-04 ✅** — Delivery fee = **$1.50** (env `DELIVERY_FEE`); free delivery when subtotal **≥ $50** (env `FREE_DELIVERY_THRESHOLD`). USD base; KHR derived via `USD_KHR_RATE`. → BACKEND-01, FRONTEND-14, FRONTEND-15.
 - **CLARIFY-06 ✅** — Telegram alert = **full order details**: order #, items (variant + qty), total (USD + KHR), payment method (KHQR/COD), customer name, phone, delivery address, note. `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are deploy-time `.env` secrets (never committed); **private chat only**. BACKEND-09 builds against placeholders until provided. → BACKEND-09.
@@ -53,7 +53,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 - _Completed 2026-05-31 — `DATABASE_URL` set in `backend/.env`; `npx medusa db:migrate` ran clean; 138 core tables verified (product, order, customer, region, …)._
 - **Objective**: Point Medusa at the chosen Postgres.
-- **Requirements**: Set `DATABASE_URL` in `.env` — Supabase free tier for dev, Postgres on the Proxmox VM for production (same URL var, swapped per environment). Run `npx medusa db:migrate` to apply core schema.
+- **Requirements**: Set `DATABASE_URL` in `.env` — Postgres on the Proxmox VM for UAT/dev and production (same URL var, swapped per environment). Run `npx medusa db:migrate` to apply core schema.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `backend/.env`
 - **Acceptance Criteria**: `db:migrate` completes; core tables exist in the DB.
@@ -103,8 +103,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/modules/social-identity/models/social-identity.ts`, `service.ts`, `index.ts`
 - **Acceptance Criteria**: Module registers without error.
 
-### SETUP-08: Generate & run custom migrations
+### ✅ SETUP-08: Generate & run custom migrations
 
+- _Completed 2026-05-31 — Generated + applied migrations for both custom modules against the UAT DB (`172.16.18.10/medusa`). `npx medusa db:generate stockMovement socialIdentity` (camelCase module keys — the PascalCase form in the requirement errors `UNKNOWN_MODULES`) produced `src/modules/stock-movement/migrations/Migration20260531123948.ts` + `src/modules/social-identity/migrations/Migration20260531123949.ts`; `npx medusa db:migrate` applied both. Verified via `information_schema`: `stock_movement` (id, variant_id, type[check in|out|adjust], quantity, reason, order_id nullable, created_by + DML created_at/updated_at/deleted_at) and `customer_social_identity` (id, customer_id, provider default `facebook`, provider_user_id + DML timestamps) exist with the specified columns._
 - **Objective**: Persist the two custom modules.
 - **Requirements**: Run `npx medusa db:generate StockMovement SocialIdentity` then `npx medusa db:migrate`. (Medusa emits timestamped migrations after core — no manual numbering.)
 - **Dependencies**: SETUP-06, SETUP-07

@@ -5,7 +5,7 @@
 * **Backend** : Medusa **v2.15.3** (pinned exact; MFA-capable patch; still outside the post-v2.13.6 migration-bug window), Node  **20 LTS** , TypeScript (strict)
 * **Storefront** : Next.js **15** (App Router), React 19, TypeScript (strict)
 * **Styling** : Tailwind CSS **v4** (CSS-based `@theme` tokens from `DESIGN.md`)
-* **Database** : Postgres — Supabase free tier (dev) / Postgres on Proxmox VM (prod). Single `DATABASE_URL` per environment.
+* **Database** : Postgres on the Proxmox VM (Cambodia). The LAN host in `DATABASE_URL` is the **UAT / dev** database and the agent MAY run migrations against it; real production, when stood up, is a separate host with human-only migrations. Single `DATABASE_URL` per environment. (Earlier Supabase free-tier dev option retired.)
 * **Cache/events** : Redis (Medusa event bus + workflow engine)
 * **File storage** : Cloudflare **R2** via Medusa S3 file provider; served through Cloudflare CDN on `img.<domain>`
 * **Payments (v1)** : Bakong KHQR (Individual) via **vendored** `src/modules/bakong-payment/`, called through an in-Cambodia HTTP proxy. No card data. COD as second path.
@@ -18,7 +18,7 @@
 ## Repos
 
 * `backend/` — Medusa
-* `ali-store-storefront/` — Next.js
+* `storefront/` — Next.js
 
 ## Backend file organization (`backend/src/`)
 
@@ -51,7 +51,7 @@ Custom modules in v1: `bakong-payment`, `stock-movement`, `social-identity`.
 * **Forms** : submit via server actions or Next route handlers — never POST directly from the client to admin endpoints.
 * **Tailwind tokens** : use the named tokens from `DESIGN.md` (`bg-ink`, `text-mute`, `bg-soft-cloud`, `text-accent`, `rounded-pill`). No ad-hoc hex values.
 * **Medusa modules** : data model in `models/`, business logic in `service.ts`, registration in `index.ts`. Generate migrations with `npx medusa db:generate <Module>`.
-* **Migrations** : Medusa emits timestamped migration files. Never run `db:migrate` against prod from the agent — file generation only; humans apply to prod.
+* **Migrations** : Medusa emits timestamped migration files. The agent MAY run `db:generate` and `db:migrate` against the **UAT / dev** database. Never run `db:migrate`/`db:reset`/`db:rollback` against real production from the agent — humans apply those after review + backup.
 * **Validation** : every custom route handler validates input with **zod** before touching the service layer.
 * **Errors** : log server-side with correlation id; return a generic shape to the client.
 * **Dependencies** : pin exact (no `^`/`~`), commit lockfiles, install with `npm ci`. Vendor security-critical small packages (`bakong-khqr` logic lives in our own module).
@@ -69,7 +69,7 @@ Defined in `.env.example` (no values committed).
 * Backend dev: `npx medusa develop`
 * Backend build: `npx medusa build`
 * Generate migration: `npx medusa db:generate <ModuleName>`
-* Run migration (dev only): `npx medusa db:migrate`
+* Run migration (UAT / dev only): `npx medusa db:migrate`
 * Seed (dev only): `npx medusa exec ./src/scripts/seed.ts`
 * Storefront dev: `npm run dev`
 * Storefront build: `npm run build`

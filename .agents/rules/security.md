@@ -134,7 +134,7 @@ Authz lives in Medusa's API layer. Supabase RLS only for non-Medusa tables.
 
 * Review migrations for destructive ops before merge.
 * Backup + verify before any prod migration.
-* Never run `db:migrate`/`db:reset`/`db:rollback` against non-dev DB from the agent.
+* The agent MAY run `db:migrate`/`db:generate` against the UAT/dev database. Never run `db:migrate`/`db:reset`/`db:rollback` against real production from the agent.
 
 ## Dependencies
 
