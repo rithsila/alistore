@@ -1,6 +1,7 @@
 import { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import {
+  createProductCategoriesWorkflow,
   createRegionsWorkflow,
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows"
@@ -16,6 +17,20 @@ import {
 // Run with: npx medusa exec ./src/scripts/seed.ts  (dev only)
 
 const CAMBODIA_REGION_NAME = "Cambodia"
+
+// SETUP-09 — Storefront product categories (the category tabs).
+//
+// English names only for v1 per the locked English-first decision (CLARIFY-02);
+// Khmer category labels are deferred to v2. Each category has an explicit,
+// stable handle used in storefront URLs.
+const STOREFRONT_CATEGORIES: ReadonlyArray<{ name: string; handle: string }> = [
+  { name: "T-shirt", handle: "t-shirt" },
+  { name: "Polo", handle: "polo" },
+  { name: "Outerwear", handle: "outerwear" },
+  { name: "Hoodie", handle: "hoodie" },
+  { name: "Pants", handle: "pants" },
+  { name: "Accessories", handle: "accessories" },
+]
 
 export default async function seed({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
@@ -78,5 +93,37 @@ export default async function seed({ container }: ExecArgs) {
     })
   }
 
-  logger.info("Finished seeding region & currency data.")
+  // 3. Product categories (English names for v1 — Khmer labels = v2).
+  // These become the storefront category tabs. Idempotent: only create
+  // categories whose handle is not already present.
+  const { data: existingCategories } = await query.graph({
+    entity: "product_category",
+    fields: ["id", "name", "handle"],
+  })
+
+  const existingHandles = new Set(existingCategories.map((c) => c.handle))
+  const categoriesToCreate = STOREFRONT_CATEGORIES.filter(
+    (c) => !existingHandles.has(c.handle)
+  )
+
+  if (categoriesToCreate.length === 0) {
+    logger.info("All storefront categories already exist — skipping creation.")
+  } else {
+    logger.info(
+      `Creating ${categoriesToCreate.length} product categor` +
+        `${categoriesToCreate.length === 1 ? "y" : "ies"}: ` +
+        `${categoriesToCreate.map((c) => c.name).join(", ")}...`
+    )
+    await createProductCategoriesWorkflow(container).run({
+      input: {
+        product_categories: categoriesToCreate.map((c) => ({
+          name: c.name,
+          handle: c.handle,
+          is_active: true,
+        })),
+      },
+    })
+  }
+
+  logger.info("Finished seeding region, currency & category data.")
 }

@@ -1,6 +1,6 @@
 # Supply-chain hardening policy
 
-> Task: `SETUP-01B`. Scope: both repos (`backend/`, and `ali-store-storefront/`
+> Task: `SETUP-01B`. Scope: both repos (`backend/`, and `storefront/`
 > once scaffolded). Authoritative rules: `.claude/rules/Stack.md` and
 > `.claude/rules/security.md` — this doc explains how they are enforced.
 

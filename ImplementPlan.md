@@ -2,7 +2,7 @@
 
 Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min each, ~1 file/feature), grouped by phase in dependency order. Backend task IDs match the API IDs already assigned in `PRD.md §7`.
 
-**Repos:** `backend/` (Medusa v2, Proxmox VM in Cambodia) · `ali-store-storefront/` (Next.js 15, Vercel).
+**Repos:** `backend/` (Medusa v2, Proxmox VM in Cambodia) · `storefront/` (Next.js 15, Vercel).
 **Locked design tokens (from nike-DESIGN.md, with your coral substitution):** `ink #111111`, `canvas #ffffff`, `soft-cloud #f5f5f5`, `hairline #cacacb`, `hairline-soft #e5e5e5`, `mute #707072`, `success #007d48`. **Accent/sale = coral (replaces Nike sale-red `#d30005`)**. Fonts: Inter (UI 400/500) + Bebas Neue (96px uppercase campaign tier). 8px spacing grid; pill radius `999px`; product image ratio `1:1` on `soft-cloud`.
 
 ---
@@ -15,17 +15,19 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **CLARIFY-02 ✅** — **English-first for v1.** UI chrome + categories in English; font stack is Latin-only (Inter + Bebas Neue). Khmer UI + Khmer font deferred to **v2**. → FRONTEND-02, SETUP-09, FRONTEND-07.
 - **CLARIFY-03 ✅ (mechanism)** — Exchange rate via env var `USD_KHR_RATE` for v1 (admin-editable deferred to v2). Rate *value* to be provided later; build proceeds with a placeholder. → BACKEND-01.
 - **CLARIFY-05 ✅** — Individual KHQR confirmed (type). Real `bank_account`, dev/prod `BAKONG_TOKEN`, and `BAKONG_PROXY_URL` are deploy-time secrets kept only in `.env` (never committed); proxy host added to the SSRF allowlist at deploy. BACKEND-03 builds against the sandbox until provided. → BACKEND-03.
-- **CLARIFY-07 ✅** — Postgres on the Proxmox VM for both **UAT/dev** and production (co-located with backend; Supabase free tier retired to avoid auto-pause). One `DATABASE_URL` per environment; the agent may migrate the UAT/dev DB. → SETUP-02.
+- **CLARIFY-07 ✅** — **Dev (current) = Postgres on the Proxmox VM** (co-located with backend; agent-migratable). **Production (after go-live) = Supabase.** One `DATABASE_URL` per environment, swapped per environment. → SETUP-02.
 - **CLARIFY-10 ✅** — VAT = 10% (Cambodia standard), wired but **off** in v1. TIN provided when enabling. → BACKEND-06.
 - **CLARIFY-04 ✅** — Delivery fee = **$1.50** (env `DELIVERY_FEE`); free delivery when subtotal **≥ $50** (env `FREE_DELIVERY_THRESHOLD`). USD base; KHR derived via `USD_KHR_RATE`. → BACKEND-01, FRONTEND-14, FRONTEND-15.
 - **CLARIFY-06 ✅** — Telegram alert = **full order details**: order #, items (variant + qty), total (USD + KHR), payment method (KHQR/COD), customer name, phone, delivery address, note. `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are deploy-time `.env` secrets (never committed); **private chat only**. BACKEND-09 builds against placeholders until provided. → BACKEND-09.
 - **CLARIFY-08 ✅** — Domain = `alistore.com`. Storefront `shop.alistore.com` → Vercel; images `img.alistore.com` → R2/CDN. (All `<domain>` placeholders in this plan resolve to `alistore.com`.) → SETUP-05, SETUP-11.
-- **CLARIFY-09 ✅ (source)** — Product/stock source = **Google Sheet / Excel**, mapped to BACKEND-02's CSV template (title/handle, category, color, size, SKU, USD price, KHR price, initial stock, image URL) and imported via Medusa Admin's built-in product import. Exact column-name mapping pending (see below). → BACKEND-02.
+- **CLARIFY-09 ✅ (source — superseded)** — Original intent: source = Google Sheet / Excel mapped to BACKEND-02's CSV template. **Superseded by CLARIFY-09 (columns) below: no source sheet exists.** → BACKEND-02.
+- **CLARIFY-09 (columns) ✅** — **No source data sheet exists.** Instead of mapping a Google Sheet, BACKEND-02 adopts **Medusa's official product-import CSV format directly** (the columns Medusa Admin's built-in importer expects) and seeds a **simple ready-made sample clothing catalog** against that format for v1 dev. This closes the column-mapping question entirely; a real export can be re-mapped later if one is ever produced. → BACKEND-02.
+- **CLARIFY-11 ✅ (mechanism: dev-first)** — No production backend hostname chosen yet (no domain purchased). **Dev runs against the local backend (`localhost:9000`)**; the production Medusa API hostname — which sets storefront `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist — is deferred until a domain is selected/bought. SETUP-10 already builds against localhost; SETUP-11 (DNS) awaits the domain. The hostname *value* is tracked under "Still pending" below. → SETUP-10, SETUP-11.
 
 ### Still pending (provide later — non-blocking; tasks build against env placeholders / sandbox)
 
-- **CLARIFY-09 (columns)** — Exact Google Sheet / Excel column names, to finalize the field-by-field mapping to the CSV template. Non-blocking: BACKEND-02 builds the template now; mapping finalized when columns provided. → BACKEND-02.
-- **CLARIFY-11** — Backend public hostname for the Medusa API (sets storefront `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist). Suggested `api.alistore.com` → Proxmox VM, *to confirm*. Non-blocking: dev uses localhost; needed at deploy. → SETUP-10, SETUP-11.
+- **CLARIFY-11 (hostname value)** — The *value* of the production Medusa API hostname is still unknown because no domain has been bought yet (mechanism resolved above: dev-first on `localhost:9000`). When the domain is chosen, set `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist, and unblock SETUP-11 (DNS). Non-blocking for dev. → SETUP-11.
+- **CLARIFY-08-REOPEN ⚠️** — **Conflict flag:** CLARIFY-08 previously locked `Domain = alistore.com` (storefront `shop.alistore.com`, images `img.alistore.com`). The CLARIFY-11 answer ("not sure yet, will find and buy domain later") indicates the domain is **not actually owned/confirmed**. All `<domain>` placeholders (SETUP-05 prod URL, SETUP-11 subdomains, CSP `img-src`/`connect-src`) therefore remain provisional until the real domain is purchased. Resolve with a dedicated `/clarify CLARIFY-08` once the domain is bought. → SETUP-05, SETUP-11.
 
 ---
 
@@ -53,7 +55,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 - _Completed 2026-05-31 — `DATABASE_URL` set in `backend/.env`; `npx medusa db:migrate` ran clean; 138 core tables verified (product, order, customer, region, …)._
 - **Objective**: Point Medusa at the chosen Postgres.
-- **Requirements**: Set `DATABASE_URL` in `.env` — Postgres on the Proxmox VM for UAT/dev and production (same URL var, swapped per environment). Run `npx medusa db:migrate` to apply core schema.
+- **Requirements**: Set `DATABASE_URL` in `.env` — Postgres on the Proxmox VM for dev (current); Supabase for production after go-live (same URL var, swapped per environment). Run `npx medusa db:migrate` to apply core schema.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `backend/.env`
 - **Acceptance Criteria**: `db:migrate` completes; core tables exist in the DB.
@@ -112,32 +114,35 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/modules/*/migrations/*.ts`
 - **Acceptance Criteria**: Tables `stock_movement` and `customer_social_identity` exist with the specified columns.
 
-### SETUP-09: Seed product categories (Khmer/EN)
+### ✅ SETUP-09: Seed product categories (Khmer/EN)
 
+- _Completed 2026-05-31 — `src/scripts/seed.ts` (categories block) seeds 6 English v1 categories with explicit handles (T-shirt, Polo, Outerwear, Hoodie, Pants, Accessories) via `createProductCategoriesWorkflow`, idempotent by handle. Ran `npx medusa exec` against the dev DB: created 5 (Pants skipped — handle already held by a pre-existing default Medusa demo category). Live `GET /store/product-categories` returns all seeded categories `is_active: true`. Khmer labels deferred to v2 per CLARIFY-02._
 - **Objective**: Create the storefront category tabs.
 - **Requirements**: Seed categories with **English** names for v1 (e.g. `T-shirt`, `Polo`, `Outerwear`) and handles. (Khmer category names = v2.)
 - **Dependencies**: SETUP-02
 - **Deliverables**: `src/scripts/seed.ts` (categories block)
 - **Acceptance Criteria**: `/store/product-categories` returns the seeded categories.
 
-### SETUP-10: Initialize Next.js 15 storefront
+### ✅ SETUP-10: Initialize Next.js 15 storefront
 
+- _Completed 2026-05-31 — Official `nextjs-starter-medusa` cloned into `storefront/` (Next.js 15.3.9, React 19, App Router); nested `.git` + Yarn artifacts removed and converted to **npm** (`.npmrc save-exact=true`, committed `package-lock.json`). **All** deps pinned exact (no `^`/`~`): `@medusajs/js-sdk` + `@medusajs/types` → `2.15.3` (backend core); `@medusajs/ui` 4.1.15, `@medusajs/ui-preset`/`icons` 2.15.5. `.env.local` wired to dev backend (`localhost:9000`), Default Publishable API Key, default region `kh`. `next dev` boots on :8000; `GET /kh/store` → **200** listing all 4 seeded products. **Tailwind v4 DEFERRED to FRONTEND-01** (user-approved): the starter ships Tailwind v3 + `@medusajs/ui`; the v4 `@theme`-token migration belongs to the design-system tasks. Follow-ups: (a) `next.config.js` image-host allowlist for `img.<domain>` (SETUP-05/SETUP-11); (b) `npm audit` 1 high (`next@15.3.9`) + 1 moderate (transitive `postcss`) — fix requires a deliberate Next bump, tracked as storefront hardening._
 - **Objective**: Create the storefront from the Medusa Next.js Starter.
 - **Requirements**: Clone Medusa `nextjs-starter`; set `MEDUSA_BACKEND_URL`, publishable key; Tailwind v4 present; pin all deps to exact versions and commit the lockfile (per SETUP-01B); boot.
-- **Dependencies**: SETUP-01, CLARIFY-11
-- **Deliverables**: `ali-store-storefront/` (`src/app/`, `.env.local`)
+- **Dependencies**: SETUP-01
+- **Deliverables**: `storefront/` (`src/app/`, `.env.local`)
 - **Acceptance Criteria**: Storefront runs and lists seeded products from the backend.
 
 ### SETUP-11: Cloudflare DNS / domain / subdomains
 
 - **Objective**: Route the domain.
 - **Requirements**: Add domain to Cloudflare; `shop.<domain>` → Vercel, `img.<domain>` → R2, backend host → Proxmox; enable SSL + CDN caching.
-- **Dependencies**: SETUP-05, SETUP-10, CLARIFY-11
+- **Dependencies**: SETUP-05, SETUP-10, CLARIFY-11 (hostname value), CLARIFY-08-REOPEN (real domain)
 - **Deliverables**: Cloudflare DNS records (documented in `infra/dns.md`)
 - **Acceptance Criteria**: All three subdomains resolve over HTTPS.
 
-### SETUP-12: Secrets scaffolding
+### ✅ SETUP-12: Secrets scaffolding
 
+- _Completed 2026-05-31 — keys appended to `backend/.env.template` (repo's committed env convention; `.env.example` would be git-ignored per `.gitignore`)._
 - **Objective**: Centralize all external secrets.
 - **Requirements**: Define env keys (no values committed): `BAKONG_TOKEN`, `BAKONG_PROXY_URL`, `BAKONG_ACCOUNT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `FB_APP_ID`, `FB_APP_SECRET`, `USD_KHR_RATE`, `LOW_STOCK_THRESHOLD`, `DELIVERY_FEE`, `FREE_DELIVERY_THRESHOLD`.
 - **Dependencies**: SETUP-01
@@ -148,8 +153,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 ## Phase 2 — BACKEND (Medusa)
 
-### BACKEND-01: App settings (rate, threshold, delivery)
+### ✅ BACKEND-01: App settings (rate, threshold, delivery)
 
+- _Completed 2026-05-31 — `src/lib/settings.ts` reads the four env vars with documented fallbacks; `usdToKhr` rounds to whole riel. Type-check + runtime acceptance verified._
 - **Objective**: Expose exchange rate, low-stock threshold (default 5), delivery fee, and free-delivery threshold to the rest of the app.
 - **Requirements**: Read from env (`USD_KHR_RATE`, `LOW_STOCK_THRESHOLD` default 5, `DELIVERY_FEE`, `FREE_DELIVERY_THRESHOLD`); provide a small config helper `src/lib/settings.ts`. KHR conversion rounds to whole riel. (Rate + delivery *values* provided later — placeholders until then.)
 - **Dependencies**: SETUP-12
@@ -159,7 +165,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 ### BACKEND-02: CSV product/variant import
 
 - **Objective**: Bulk-load catalog with per-size/color variants.
-- **Requirements**: Define CSV template (one row per variant: product title/handle, category, color, size, SKU, USD price, KHR price, initial stock, image URL) mapped from your Google Sheet / Excel export (exact column mapping finalized when columns provided); use Medusa Admin's built-in product import.
+- **Requirements**: Define the import CSV using **Medusa's official product-import column format** (one row per variant: product title/handle, category, color, size, SKU, USD price, KHR price, initial stock, image URL). No source Google Sheet exists (CLARIFY-09 resolved) — author a **simple ready-made sample clothing catalog** against that format; use Medusa Admin's built-in product import.
 - **Dependencies**: SETUP-09
 - **Deliverables**: `imports/products-template.csv`, `docs/import.md`
 - **Acceptance Criteria**: Importing the template creates products with variants and inventory levels; variants visible in `/store/products`.

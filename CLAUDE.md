@@ -19,11 +19,11 @@ This is a **spec-driven** project. The Medusa backend is scaffolded at `backend/
 Two separate repos:
 
 - **`backend/`** — Medusa v2.15.3 (admin MFA enabled), Node 20 LTS, TypeScript. Runs on a Proxmox VM in Cambodia. Hosts the Medusa Admin (built-in).
-- **`ali-store-storefront/`** — Next.js 15 (App Router), React 19, Tailwind CSS v4. Deployed on Vercel. Started from the official Medusa Next.js Starter.
+- **`storefront/`** — Next.js 15 (App Router), React 19, Tailwind CSS v4. Deployed on Vercel. Started from the official Medusa Next.js Starter.
 
 ```
 Customer phone → shop.<domain> (Vercel/Next.js) → Medusa backend (Proxmox VM)
-                                                    ├── PostgreSQL (Proxmox VM — UAT/dev + prod)
+                                                    ├── PostgreSQL (Proxmox dev / Supabase prod post-go-live)
                                                     ├── Redis (Proxmox prod / in-memory dev)
                                                     ├── Cloudflare R2 (images via img.<domain>)
                                                     ├── Bakong KHQR (via in-Cambodia proxy)
@@ -44,7 +44,7 @@ npx medusa db:migrate       # run database migrations
 npx medusa db:generate <Name>  # generate migration for custom modules
 ```
 
-**Storefront** (`ali-store-storefront/`):
+**Storefront** (`storefront/`):
 ```bash
 npm run dev                 # Next.js dev server
 ```

@@ -29,7 +29,7 @@ backend/          Medusa v2 + Admin
     ├── modules/{bakong-payment,stock-movement,social-identity}/
     ├── subscribers/  jobs/  workflows/  scripts/  lib/
 
-ali-store-storefront/       Next.js 15 App Router
+storefront/       Next.js 15 App Router
 └── src/
     ├── app/
     ├── components/{ui,product,layout,checkout}/
@@ -49,7 +49,7 @@ npx medusa db:migrate       # dev only — never run against prod from here
 npx medusa exec ./src/scripts/seed.ts   # seed categories
 npx medusa develop          # http://localhost:9000, admin at /app
 
-# in ali-store-storefront/
+# in storefront/
 cp .env.example .env.local
 npm ci
 npm run dev                 # http://localhost:8000
@@ -80,7 +80,7 @@ Filled in `.env` for each repo. Nothing committed.
 | `FREE_DELIVERY_THRESHOLD` | Order value for free delivery |
 | `S3_*` | Cloudflare R2 keys for file provider |
 
-### Storefront (`ali-store-storefront/.env.local`)
+### Storefront (`storefront/.env.local`)
 
 | Var | Purpose |
 |---|---|
