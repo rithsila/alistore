@@ -49,48 +49,54 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `.npmrc` (`save-exact=true`), CI audit step (`ci/audit.yml`), `docs/supply-chain.md`
 - **Acceptance Criteria**: `save-exact=true` set; CI fails on a seeded high-severity advisory; no `^`/`~` ranges in either `package.json`.
 
-### SETUP-02: Connect Postgres
+### ✅ SETUP-02: Connect Postgres
 
+- _Completed 2026-05-31 — `DATABASE_URL` set in `backend/.env`; `npx medusa db:migrate` ran clean; 138 core tables verified (product, order, customer, region, …)._
 - **Objective**: Point Medusa at the chosen Postgres.
 - **Requirements**: Set `DATABASE_URL` in `.env` — Supabase free tier for dev, Postgres on the Proxmox VM for production (same URL var, swapped per environment). Run `npx medusa db:migrate` to apply core schema.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `backend/.env`
 - **Acceptance Criteria**: `db:migrate` completes; core tables exist in the DB.
 
-### SETUP-03: Configure Redis
+### ✅ SETUP-03: Configure Redis
 
+- _Completed 2026-05-31 — Redis modules (`cache-redis`, `event-bus-redis`, `workflow-engine-redis`) wired in `medusa-config.ts`, gated on `REDIS_URL` with in-memory fallback for dev; `REDIS_URL` set in `.env`/`.env.template`. Verified: `npx medusa develop` boots on :9000 with all three Redis connections established and no event-bus warning. (Note: `workflow-engine-redis` requires `options: { redis: { url } }` in v2.15.3 — the flat `redisUrl` form crashes the loader.)_
 - **Objective**: Enable event bus + workflow engine for production reliability.
 - **Requirements**: Add Redis modules in `medusa-config.ts` (`@medusajs/event-bus-redis`, `@medusajs/workflow-engine-redis`); set `REDIS_URL`. Dev may use in-memory.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `medusa-config.ts`, `.env`
 - **Acceptance Criteria**: Backend boots with Redis modules loaded; no event-bus warnings in prod mode.
 
-### SETUP-04: Regions & currencies (USD + KHR)
+### ✅ SETUP-04: Regions & currencies (USD + KHR)
 
+- _Completed 2026-05-31 — `src/scripts/seed.ts` (region/currency block) sets store `supported_currencies` to USD (default) + KHR and creates a `Cambodia` region (`currency_code: usd`, country `kh`). Ran via `npx medusa exec`; live `/store/regions` returns the Cambodia region (usd) and the store exposes both usd + khr. Per Medusa v2, dual currency is store-level (one `currency_code` per region); KHR derived via `USD_KHR_RATE` (FRONTEND-22 / INTEGRATION-08) — confirmed decision._
 - **Objective**: Enable dual currency.
 - **Requirements**: Create a Cambodia region with `usd` and `khr` enabled via seed/admin; set USD as store default.
 - **Dependencies**: SETUP-02
 - **Deliverables**: `src/scripts/seed.ts` (region/currency block)
 - **Acceptance Criteria**: Store API `/store/regions` returns a region exposing both `usd` and `khr`.
 
-### SETUP-05: Cloudflare R2 file provider
+### ✅ SETUP-05: Cloudflare R2 file provider
 
+- _Completed 2026-05-31 — R2 bucket `ali-store-products` wired via `@medusajs/file-s3`; upload→public-URL load verified end-to-end against the temporary `r2.dev` URL. Production `img.alistore.com` swap tracked in SETUP-11._
 - **Objective**: Store product images on R2 served via CDN.
 - **Requirements**: Configure `@medusajs/file-s3` in `medusa-config.ts` with R2 endpoint, bucket, keys, and public `img.<domain>` base URL. Secrets in `.env`.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `medusa-config.ts`, `.env`
 - **Acceptance Criteria**: Uploading an image in admin returns an `img.<domain>` URL that loads.
 
-### SETUP-06: `stock_movement` module + model
+### ✅ SETUP-06: `stock_movement` module + model
 
+- _Completed 2026-05-31 — Module `stockMovement` created at `src/modules/stock-movement/` (model + service + index); `stock_movement` model has exactly `id, variant_id, type(enum in|out|adjust), quantity(number), reason(text), order_id(nullable), created_by` (`created_at` auto-added by Medusa DML). Registered in `medusa-config.ts`; `npm run build` completes successfully (module loads without error). Migrations deferred to SETUP-08 per plan._
 - **Objective**: Define the custom stock ledger.
 - **Requirements**: Create module with model fields exactly: `id`, `variant_id`, `type` (enum `in|out|adjust`), `quantity` (int), `reason` (text), `order_id` (nullable), `created_by` (text), `created_at`.
 - **Dependencies**: SETUP-01
 - **Deliverables**: `src/modules/stock-movement/models/stock-movement.ts`, `src/modules/stock-movement/service.ts`, `src/modules/stock-movement/index.ts`
 - **Acceptance Criteria**: Module registers in `medusa-config.ts` without error.
 
-### SETUP-07: `customer_social_identity` module + model
+### ✅ SETUP-07: `customer_social_identity` module + model
 
+- _Completed 2026-05-31 — Module `socialIdentity` created at `src/modules/social-identity/` (model + service + index); `customer_social_identity` model has exactly `id, customer_id, provider(text, default "facebook"), provider_user_id` (`created_at` auto-added by Medusa DML). Registered in `medusa-config.ts`; `npm run build` completes successfully (module loads without error). Migrations deferred to SETUP-08 per plan._
 - **Objective**: Define the Facebook-login identity link.
 - **Requirements**: Model fields exactly: `id`, `customer_id`, `provider` (default `facebook`), `provider_user_id`, `created_at`.
 - **Dependencies**: SETUP-01

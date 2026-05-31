@@ -1,0 +1,41 @@
+# Version control
+.git
+.svn
+.hg
+
+# Dependency directories
+node_modules
+bower_components
+
+# Build and cache directories
+dist
+build
+.next
+out
+.cache
+.medusa/server
+.medusa/admin
+.medusa/types
+
+# IDEs and editors
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Lock files (usually kept untouched by formatters)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environmental variables
+.env
+.env.*
