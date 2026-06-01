@@ -39,6 +39,7 @@ import type {
   WebhookActionResult,
 } from "@medusajs/types"
 import { buildKhqr, type KhqrCurrency } from "./lib/khqr"
+import { checkTransactionByMd5 } from "./lib/proxy"
 
 /** Provider config supplied from `medusa-config.ts` (no secrets hardcoded). */
 export interface BakongProviderOptions {
@@ -133,11 +134,78 @@ class BakongProviderService extends AbstractPaymentProvider<BakongProviderOption
     return { status, data: input.data }
   }
 
-  /** Authorization is gated on BACKEND-03B verification — keep it pending. */
+  /**
+   * Authorize the payment (BACKEND-03B). This is the security-critical gate:
+   * the session becomes authorized ONLY after a server-side Bakong verify by
+   * the QR's md5 reference through the in-Cambodia proxy — never on a
+   * client-reported status (security.md "Payments"). Returning "captured"
+   * lets the Payment Module create and capture the payment in one step, so the
+   * resulting order is fully paid.
+   *
+   * Medusa's `completeCartWorkflow` calls this at the end of cart completion;
+   * the storefront only triggers completion after `/khqr/status` has already
+   * confirmed payment, so the live verify here normally agrees. If it cannot
+   * confirm (sandbox without a proxy, or a transient proxy failure) the session
+   * stays "pending" and completion is retried on the next status poll.
+   */
   async authorizePayment(
     input: AuthorizePaymentInput
   ): Promise<AuthorizePaymentOutput> {
-    return { status: "pending", data: input.data }
+    const data = (input.data ?? {}) as Record<string, unknown>
+    const reference =
+      typeof data.reference === "string" ? data.reference : undefined
+
+    const verified = await this.verifyPaidViaProxy(reference)
+    if (!verified) {
+      return { status: "pending", data: input.data }
+    }
+    return {
+      status: "captured",
+      data: { ...data, status: "captured" },
+    }
+  }
+
+  /**
+   * Server-side verify of a KHQR payment by its md5 reference via the proxy.
+   * Returns false (never throws) when it cannot confirm — sandbox/no proxy
+   * configured, or a transient proxy error — so authorization simply stays
+   * pending and is retried, and "paid" is never fabricated.
+   */
+  private async verifyPaidViaProxy(reference?: string): Promise<boolean> {
+    if (!reference) {
+      return false
+    }
+    const proxyBaseUrl = process.env.BAKONG_PROXY_URL
+    const token = process.env.BAKONG_TOKEN
+    if (!proxyBaseUrl || !token) {
+      return false // sandbox / not configured — cannot confirm
+    }
+    try {
+      return await checkTransactionByMd5({
+        proxyBaseUrl,
+        token,
+        reference,
+        allowedHosts: this.proxyAllowedHosts(),
+      })
+    } catch {
+      // Proxy unavailable / SSRF-blocked: stay pending, retry next poll.
+      // No sensitive context (reference/token/body) is logged.
+      this.logger_.warn("[bakong] payment verify via proxy was inconclusive")
+      return false
+    }
+  }
+
+  /** Allowlisted Bakong proxy hosts (security.md SSRF), from env. */
+  private proxyAllowedHosts(): string[] | undefined {
+    const raw = process.env.BAKONG_PROXY_ALLOWED_HOSTS
+    if (!raw) {
+      return undefined
+    }
+    const hosts = raw
+      .split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean)
+    return hosts.length > 0 ? hosts : undefined
   }
 
   async capturePayment(

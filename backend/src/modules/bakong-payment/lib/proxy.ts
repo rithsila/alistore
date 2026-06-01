@@ -23,6 +23,9 @@ import { isIP } from "net"
 /** Bakong Open API path (mirrored by the proxy) for deeplink generation. */
 const DEEPLINK_PATH = "generate_deeplink_by_qr"
 
+/** Bakong Open API path (mirrored by the proxy) for transaction verification. */
+const CHECK_MD5_PATH = "check_transaction_by_md5"
+
 /** Default network timeout for the proxy call. */
 const DEFAULT_TIMEOUT_MS = 8000
 
@@ -107,6 +110,17 @@ export function assertSafeProxyUrl(rawUrl: string, allowedHosts?: string[]): URL
   }
   if (url.username || url.password) {
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must not embed credentials")
+  }
+
+  // In production the SSRF allowlist is mandatory (security.md: "host on
+  // hard-coded allowlist"). Without it, any public https host would be allowed.
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!allowedHosts || allowedHosts.length === 0)
+  ) {
+    throw new UnsafeProxyUrlError(
+      "BAKONG_PROXY_ALLOWED_HOSTS must be set in production (SSRF allowlist required)"
+    )
   }
 
   const host = url.hostname.toLowerCase()
@@ -205,4 +219,76 @@ export async function generateDeeplink(
     throw new BakongProxyError("Bakong proxy response had no deeplink")
   }
   return deeplink
+}
+
+export interface CheckTransactionOptions {
+  /** Proxy base URL that mirrors the Bakong API (BAKONG_PROXY_URL). */
+  proxyBaseUrl: string
+  /** Bakong bearer token (BAKONG_TOKEN). Never logged. */
+  token: string
+  /** md5 reference of the KHQR (status-check key). SENSITIVE — never logged. */
+  reference: string
+  /** Allowlisted proxy hosts; when non-empty the host must be a member. */
+  allowedHosts?: string[]
+  /** Network timeout (ms). */
+  timeoutMs?: number
+}
+
+/**
+ * Verify a KHQR payment by its md5 `reference` via the in-Cambodia proxy
+ * (BACKEND-03B). Returns `true` ONLY when Bakong confirms the transaction
+ * exists — this server-side check is the sole source of truth for "paid"
+ * (security.md "Payments": never trust a client-reported status).
+ *
+ * Reuses the same SSRF guards as `generateDeeplink` (https-only, allowlisted
+ * host, no private/loopback resolution re-checked at call time, no redirects).
+ * Throws `BakongProxyError` (→ 502) on network/HTTP failure, or
+ * `UnsafeProxyUrlError` on SSRF validation failure.
+ *
+ * SECURITY: the `reference`, token, and response body are sensitive and MUST
+ * NOT be logged.
+ */
+export async function checkTransactionByMd5(
+  options: CheckTransactionOptions
+): Promise<boolean> {
+  const url = assertSafeProxyUrl(options.proxyBaseUrl, options.allowedHosts)
+  await assertResolvesPublic(url.hostname)
+
+  const endpoint = joinUrl(url, CHECK_MD5_PATH)
+
+  let response: Response
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      redirect: "manual", // never follow redirects (SSRF)
+      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${options.token}`,
+      },
+      body: JSON.stringify({ md5: options.reference }),
+    })
+  } catch (cause) {
+    // Network error / timeout — do not leak the reference or token.
+    throw new BakongProxyError("Bakong proxy verify request failed", cause)
+  }
+
+  // Reject any redirect response outright.
+  if (response.status >= 300 && response.status < 400) {
+    throw new BakongProxyError("Bakong proxy returned an unexpected redirect")
+  }
+  if (!response.ok) {
+    throw new BakongProxyError(`Bakong proxy returned status ${response.status}`)
+  }
+
+  let payload: { responseCode?: number; data?: unknown }
+  try {
+    payload = (await response.json()) as typeof payload
+  } catch (cause) {
+    throw new BakongProxyError("Bakong proxy returned an unreadable body", cause)
+  }
+
+  // Bakong returns responseCode 0 with a transaction payload once the QR has
+  // been paid; any non-zero code (e.g. 1 "transaction not found") = pending.
+  return payload.responseCode === 0 && payload.data != null
 }

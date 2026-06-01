@@ -9,7 +9,9 @@ import type { MiddlewareRoute } from "@medusajs/framework/http"
 import { z } from "zod"
 
 export const StartKhqrSchema = z.object({
-  cart_id: z.string().min(1),
+  // Medusa cart ids are short ULIDs (`cart_…`); cap the length so obviously
+  // malformed input is rejected before it reaches the query layer.
+  cart_id: z.string().min(1).max(100),
   currency: z.enum(["USD", "KHR"]),
 })
 

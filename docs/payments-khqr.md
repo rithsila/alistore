@@ -1,7 +1,9 @@
 # Bakong KHQR payments
 
-Status: **BACKEND-03 implemented** (KHQR "start" / QR generation). Verification
-(`/khqr/status`), capture, and stock-out are **BACKEND-03B** (not yet built).
+Status: **BACKEND-03 + BACKEND-03B implemented** — KHQR "start" (QR generation)
+and "status" (server-side verify → order completion + stock-out). A live
+end-to-end "paid" flip requires a configured Bakong proxy (deploy-time secret);
+in sandbox without a proxy the status endpoint correctly stays `pending`.
 
 Ali Store's online payment path is **Bakong KHQR** (Individual account, v1),
 implemented as a custom Medusa payment provider. Cash-on-Delivery is the second
@@ -48,13 +50,56 @@ Generate a dynamic KHQR + deeplink for a cart and hold its stock.
   - `502 payment_gateway_unavailable` — proxy/Bakong configured but unreachable.
   - `404 cart_not_found`, `400 empty_cart` / `invalid_cart_total`,
     `429 rate_limited`.
-- **Rate limits:** 5/min and 20/hour per IP (cache-module fixed window).
+- **Idempotency:** repeated `/start` for the same cart reuse the existing,
+  non-expired Bakong session (same `qr`/`reference`) instead of reserving stock
+  and creating a new session — a double-tapped "Pay" can't stack reservations.
+- **Rate limits:** 5/min per client IP **and** 20/hour per cart (the guest
+  "session"), cache-module fixed window. The client IP is taken from a trusted
+  hop only — `X-Forwarded-For` is ignored unless `TRUSTED_PROXY_COUNT` is set to
+  the number of reverse proxies in front of the backend (default 0 = socket IP),
+  so a spoofed header can't evade the limiter.
 
-### `GET /store/payments/khqr/status?reference=` — **BACKEND-03B (pending)**
+### `GET /store/payments/khqr/status?reference=` — **BACKEND-03B**
 
-Server-side verification by `reference`/md5 via the proxy. Until it ships the
-payment session stays `pending`; the provider never reports a payment as
-captured without a server verify.
+Confirm a KHQR payment and finalize the order. The storefront polls this while
+the customer pays.
+
+- **Auth:** guest checkout — the (non-guessable) `reference` is the capability.
+  `/start` records a server-side `reference → cart` mapping (in the cache) that
+  this endpoint reads; it then re-confirms the reference belongs to a Bakong
+  session on that cart.
+- **Query:** `?reference=<md5>` — 32 lowercase hex chars (zod-validated).
+- **200:** `{ "status": "pending" | "paid" | "expired" }` (plus `order_id` when
+  `paid`).
+  - `pending` — not yet confirmed by Bakong (keep polling).
+  - `paid` — verified; the order has been created and the payment captured.
+  - `expired` — the QR window elapsed before payment; the `/start` reservation
+    is released and the client should stop polling.
+- **Errors** (`{ "error": string, "request_id": string }`):
+  - `502 payment_gateway_unavailable` — proxy configured but unreachable / SSRF-blocked.
+  - `404 reference_not_found`, `400 invalid_reference`, `429 rate_limited`.
+- **Verification (server-side only):** the status is decided by a proxy call to
+  Bakong's `check_transaction_by_md5` keyed on the `reference` — a
+  client-reported status is never trusted (security.md "Payments"). The result
+  is cached ≥3s server-side. In sandbox (no proxy configured) the endpoint
+  cannot confirm and stays `pending` — it never fabricates `paid`.
+- **On `paid` (order finalization, PRD §4 — order created at completion):**
+  1. release the reservation `/start` created for the cart's line items;
+  2. run `completeCartWorkflow` → creates the order and **re-reserves +
+     authorizes/captures** the payment (the Bakong provider's `authorizePayment`
+     re-verifies via the proxy as the authorization gate, so the order is never
+     placed without a live server-side confirmation);
+  3. write one idempotent `stock_movement(type=out)` per line item
+     (`order_id`, `created_by="system"`).
+- **Reservation reconciliation:** the `/start` reservation is released **before**
+  `completeCartWorkflow` runs, because completion creates its own order
+  reservations — releasing first avoids double-holding (and overselling) stock.
+- **Idempotency:** an existing `order_cart` link short-circuits to `paid`;
+  `completeCartWorkflow` is idempotent; the stock-out write skips if `out` rows
+  already exist for the order.
+- **Rate limits:** 60/min + 120/hour per `reference`, plus a 60/min per-IP
+  backstop (cache-module fixed window). Client IP uses the same trusted-hop rule
+  as `/start`.
 
 ## Vendored KHQR generation
 
@@ -85,12 +130,18 @@ token. SSRF guard (`security.md`):
 
 - proxy URL comes from env only (never request input); must be `https://`, no
   embedded credentials;
-- host must be on `BAKONG_PROXY_ALLOWED_HOSTS` when that allowlist is set;
+- the URL is validated **at boot** (`assertSafeProxyUrl` in `medusa-config.ts`)
+  so a misconfigured proxy fails startup, not mid-checkout;
+- host must be on `BAKONG_PROXY_ALLOWED_HOSTS` when that allowlist is set — and
+  the allowlist is **mandatory in production** (boot fails if `BAKONG_PROXY_URL`
+  is set but the allowlist is empty);
 - host must not resolve to a private/loopback/link-local address (re-checked at
   call time — DNS-rebind defense);
 - redirects are rejected (no 3xx following).
 
-The QR string, token, and `reference` are **never logged**.
+The QR string, token, and `reference` are **never logged**. Proxy failures and
+blocked-SSRF attempts are logged server-side by `request_id` only (no QR / token
+/ reference), and surface to the client as a generic `502`.
 
 ## Environment variables
 
@@ -114,9 +165,8 @@ provider identifier `bakong` → resolved provider id **`pp_bakong_khqr`**.
 
 ## Follow-ups (other tasks)
 
-- **BACKEND-03B** — `/khqr/status` verify by md5 via proxy; on `paid`: capture,
-  complete cart → order, write `stock_movement(out)`. Must **reconcile the
-  reservation** created at `/start` (avoid double-reserve at completion).
+- **BACKEND-07** — replace BACKEND-03B's inline `stock_movement(out)` write with
+  the shared stock-out service method (and add the admin stock-in endpoint).
 - **BACKEND-10** — expiry job: release reservations + cancel sessions/orders
   still unpaid past `expires_at`.
 - **INTEGRATION-05 / -08** — storefront wiring + currency-through-checkout.

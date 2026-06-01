@@ -13,7 +13,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 - **CLARIFY-01 ✅** — Accent token = coral `#C0461F`, fully replaces Nike's sale-red (sale price, "Sale" link, KHQR action). → FRONTEND-01.
 - **CLARIFY-02 ✅** — **English-first for v1.** UI chrome + categories in English; font stack is Latin-only (Inter + Bebas Neue). Khmer UI + Khmer font deferred to **v2**. → FRONTEND-02, SETUP-09, FRONTEND-07.
-- **CLARIFY-03 ✅ (mechanism)** — Exchange rate via env var `USD_KHR_RATE` for v1 (admin-editable deferred to v2). Rate *value* to be provided later; build proceeds with a placeholder. → BACKEND-01.
+- **CLARIFY-03 ✅ (mechanism)** — Exchange rate via env var `USD_KHR_RATE` for v1 (admin-editable deferred to v2). Rate _value_ to be provided later; build proceeds with a placeholder. → BACKEND-01.
 - **CLARIFY-05 ✅** — Individual KHQR confirmed (type). Real `bank_account`, dev/prod `BAKONG_TOKEN`, and `BAKONG_PROXY_URL` are deploy-time secrets kept only in `.env` (never committed); proxy host added to the SSRF allowlist at deploy. BACKEND-03 builds against the sandbox until provided. → BACKEND-03.
 - **CLARIFY-07 ✅** — **Dev (current) = Postgres on the Proxmox VM** (co-located with backend; agent-migratable). **Production (after go-live) = Supabase.** One `DATABASE_URL` per environment, swapped per environment. → SETUP-02.
 - **CLARIFY-10 ✅** — VAT = 10% (Cambodia standard), wired but **off** in v1. TIN provided when enabling. → BACKEND-06.
@@ -22,11 +22,11 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **CLARIFY-08 ✅** — Domain = `alistore.com`. Storefront `shop.alistore.com` → Vercel; images `img.alistore.com` → R2/CDN. (All `<domain>` placeholders in this plan resolve to `alistore.com`.) → SETUP-05, SETUP-11.
 - **CLARIFY-09 ✅ (source — superseded)** — Original intent: source = Google Sheet / Excel mapped to BACKEND-02's CSV template. **Superseded by CLARIFY-09 (columns) below: no source sheet exists.** → BACKEND-02.
 - **CLARIFY-09 (columns) ✅** — **No source data sheet exists.** Instead of mapping a Google Sheet, BACKEND-02 adopts **Medusa's official product-import CSV format directly** (the columns Medusa Admin's built-in importer expects) and seeds a **simple ready-made sample clothing catalog** against that format for v1 dev. This closes the column-mapping question entirely; a real export can be re-mapped later if one is ever produced. → BACKEND-02.
-- **CLARIFY-11 ✅ (mechanism: dev-first)** — No production backend hostname chosen yet (no domain purchased). **Dev runs against the local backend (`localhost:9000`)**; the production Medusa API hostname — which sets storefront `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist — is deferred until a domain is selected/bought. SETUP-10 already builds against localhost; SETUP-11 (DNS) awaits the domain. The hostname *value* is tracked under "Still pending" below. → SETUP-10, SETUP-11.
+- **CLARIFY-11 ✅ (mechanism: dev-first)** — No production backend hostname chosen yet (no domain purchased). **Dev runs against the local backend (`localhost:9000`)**; the production Medusa API hostname — which sets storefront `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist — is deferred until a domain is selected/bought. SETUP-10 already builds against localhost; SETUP-11 (DNS) awaits the domain. The hostname _value_ is tracked under "Still pending" below. → SETUP-10, SETUP-11.
 
 ### Still pending (provide later — non-blocking; tasks build against env placeholders / sandbox)
 
-- **CLARIFY-11 (hostname value)** — The *value* of the production Medusa API hostname is still unknown because no domain has been bought yet (mechanism resolved above: dev-first on `localhost:9000`). When the domain is chosen, set `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist, and unblock SETUP-11 (DNS). Non-blocking for dev. → SETUP-11.
+- **CLARIFY-11 (hostname value)** — The _value_ of the production Medusa API hostname is still unknown because no domain has been bought yet (mechanism resolved above: dev-first on `localhost:9000`). When the domain is chosen, set `MEDUSA_BACKEND_URL`, the CSP `connect-src` host, and the CORS allowlist, and unblock SETUP-11 (DNS). Non-blocking for dev. → SETUP-11.
 - **CLARIFY-08-REOPEN ⚠️** — **Conflict flag:** CLARIFY-08 previously locked `Domain = alistore.com` (storefront `shop.alistore.com`, images `img.alistore.com`). The CLARIFY-11 answer ("not sure yet, will find and buy domain later") indicates the domain is **not actually owned/confirmed**. All `<domain>` placeholders (SETUP-05 prod URL, SETUP-11 subdomains, CSP `img-src`/`connect-src`) therefore remain provisional until the real domain is purchased. Resolve with a dedicated `/clarify CLARIFY-08` once the domain is bought. → SETUP-05, SETUP-11.
 
 ---
@@ -157,7 +157,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 - _Completed 2026-05-31 — `src/lib/settings.ts` reads the four env vars with documented fallbacks; `usdToKhr` rounds to whole riel. Type-check + runtime acceptance verified._
 - **Objective**: Expose exchange rate, low-stock threshold (default 5), delivery fee, and free-delivery threshold to the rest of the app.
-- **Requirements**: Read from env (`USD_KHR_RATE`, `LOW_STOCK_THRESHOLD` default 5, `DELIVERY_FEE`, `FREE_DELIVERY_THRESHOLD`); provide a small config helper `src/lib/settings.ts`. KHR conversion rounds to whole riel. (Rate + delivery *values* provided later — placeholders until then.)
+- **Requirements**: Read from env (`USD_KHR_RATE`, `LOW_STOCK_THRESHOLD` default 5, `DELIVERY_FEE`, `FREE_DELIVERY_THRESHOLD`); provide a small config helper `src/lib/settings.ts`. KHR conversion rounds to whole riel. (Rate + delivery _values_ provided later — placeholders until then.)
 - **Dependencies**: SETUP-12
 - **Deliverables**: `src/lib/settings.ts`
 - **Acceptance Criteria**: Helper returns numeric values; `usdToKhr(1)` returns the configured rate, rounded.
@@ -170,7 +170,7 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `imports/products-template.csv`, `docs/import.md`
 - **Acceptance Criteria**: Importing the template creates products with variants and inventory levels; variants visible in `/store/products`.
 
-### ✅ BACKEND-03: Bakong KHQR payment provider — start
+### ✅ BACKEND-03: Bakong KHQR payment provider — start ( Done Run security Review)
 
 - _Completed 2026-06-01 — Custom Medusa payment provider `bakong-payment` (`pp_bakong_khqr`) with **vendored** KHQR generation (EMVCo TLV + CRC-16/CCITT-FALSE + md5 reference; no `bakong-khqr` package, per security.md) and an SSRF-guarded proxy client for the deeplink. `POST /store/payments/khqr/start` ({cart_id, currency}) reserves stock (409 out-of-stock), creates payment_collection + Bakong payment_session (native model — order created at completion per PRD §4), and returns {qr, deeplink, reference, expires_at} (deeplink null in sandbox; 502 when proxy configured-but-down). zod validation + per-IP rate limits (5/min, 20/hr) via cache module. `npm run build` green; QR verified structurally valid (correct tag order, CRC recomputes, reference = md5(qr)). NOTE: live HTTP round-trip against a seeded stocked cart not executed in-session (verified at generation+build layer). Verify/capture/stock-out = BACKEND-03B; reservation reconciliation/release = BACKEND-03B/BACKEND-10. Docs: `docs/payments-khqr.md`._
 - **Objective**: Generate a dynamic KHQR + deeplink for a cart.
@@ -179,8 +179,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/modules/bakong-payment/`, `src/api/store/payments/khqr/start/route.ts`
 - **Acceptance Criteria**: Endpoint returns a scannable `qr` string + `reference` against sandbox.
 
-### BACKEND-03B: Bakong KHQR status + verify
+### ✅ BACKEND-03B: Bakong KHQR status + verify
 
+- _Completed 2026-06-01 — `GET /store/payments/khqr/status?reference=` → `{status: pending|paid|expired}`. Server-side verify via the in-Cambodia proxy (`check_transaction_by_md5`, vendored SSRF-guarded `lib/proxy.ts`) keyed on the md5 reference — never trusts the client; result cached ≥3s. On `paid`: releases the `/start` reservation, runs `completeCartWorkflow` (creates the order; the Bakong provider's `authorizePayment` re-verifies via proxy and returns `captured`, so the order is paid), then writes one idempotent `stock_movement(type=out)` per line item (`order_id`, `created_by=system`). On expiry: releases the reservation. zod-validated `reference`; rate limits 60/min + 120/hr per reference + 60/min/IP. `reference→cart` resolved via a cache mapping written by `/start`. `npm run build` + `tsc --noEmit` green. NOTE: live sandbox `paid` flip not executed in-session (no Bakong proxy configured — deploy-time secret); without a proxy the endpoint correctly stays `pending` (verified at code + build layer). Stock-out written inline via the module CRUD (BACKEND-07 to reconcile to a shared method, per locked decision). Supporting edits: `bakong-payment/lib/proxy.ts` (+`checkTransactionByMd5`), `bakong-payment/service.ts` (authorize gate), `khqr/start/route.ts` (reference→cart mapping), `docs/payments-khqr.md`._
 - **Objective**: Confirm payment and finalize the order.
 - **Requirements**: `GET /store/payments/khqr/status?reference=` → `{status: pending|paid|expired}`; server-side verify via proxy by md5/reference (never trust client); on `paid` set order `paid`, commit reservation, write `stock_movement(type=out)`; on expiry release reservation.
 - **Dependencies**: BACKEND-03, BACKEND-07

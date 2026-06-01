@@ -1,4 +1,5 @@
 import { loadEnv, defineConfig } from '@medusajs/framework/utils'
+import { assertSafeProxyUrl } from './src/modules/bakong-payment/lib/proxy'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
@@ -76,6 +77,22 @@ const fileModules =
 // token, proxy) stay in .env; merchant name/city default for the Phnom Penh shop
 // and may be overridden per environment. QR expiry aligns with the 20-min
 // reservation TTL (security.md).
+// SSRF boot check (security.md "SSRF (Bakong proxy URL)"): validate the proxy
+// URL shape + allowlist at startup so a misconfigured proxy fails fast instead
+// of surfacing as a customer-facing 502 mid-checkout. DNS resolution is still
+// re-checked at call time (DNS-rebind defense in lib/proxy.ts).
+const bakongProxyUrl = process.env.BAKONG_PROXY_URL
+if (bakongProxyUrl) {
+  const allowedProxyHosts = (process.env.BAKONG_PROXY_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+  assertSafeProxyUrl(
+    bakongProxyUrl,
+    allowedProxyHosts.length > 0 ? allowedProxyHosts : undefined
+  )
+}
+
 const paymentModule = {
   resolve: "@medusajs/medusa/payment",
   options: {
