@@ -35,6 +35,7 @@ import {
 } from "@medusajs/medusa/core-flows"
 import { randomUUID } from "crypto"
 import { z } from "zod"
+import { ensureInvoiceToken } from "../../../../../lib/order-token"
 import { BAKONG_PROVIDER_ID } from "../../../../../modules/bakong-payment"
 import {
   checkTransactionByMd5,
@@ -304,6 +305,20 @@ export async function GET(
   const requestId = getRequestId(req)
   const logger = req.scope.resolve<Logger>(ContainerRegistrationKeys.LOGGER)
 
+  // Mint (or reuse) the invoice order-token for the finalized order — BACKEND-06.
+  // Best-effort: the payment is already confirmed, so a token-mint hiccup must
+  // not turn a `paid` response into an error; the next poll retries (idempotent).
+  const issueInvoiceToken = async (oid: string): Promise<string | undefined> => {
+    try {
+      return await ensureInvoiceToken(req.scope, oid)
+    } catch {
+      logger.error(
+        `[khqr/status] invoice token mint failed (request_id=${requestId})`
+      )
+      return undefined
+    }
+  }
+
   const parsed = ReferenceSchema.safeParse(req.query)
   if (!parsed.success) {
     return fail(res, 400, "invalid_reference", requestId)
@@ -350,7 +365,12 @@ export async function GET(
   })
   const existingOrderId = orderCarts?.[0]?.order_id
   if (existingOrderId) {
-    return ok(res, { status: "paid", order_id: existingOrderId })
+    const invoiceToken = await issueInvoiceToken(existingOrderId)
+    return ok(res, {
+      status: "paid",
+      order_id: existingOrderId,
+      invoice_token: invoiceToken,
+    })
   }
 
   // Expired QR window: release the hold and tell the client to stop polling.
@@ -430,5 +450,6 @@ export async function GET(
 
   await writeStockOut(req, orderId, cart.items ?? [])
 
-  return ok(res, { status: "paid", order_id: orderId })
+  const invoiceToken = await issueInvoiceToken(orderId)
+  return ok(res, { status: "paid", order_id: orderId, invoice_token: invoiceToken })
 }

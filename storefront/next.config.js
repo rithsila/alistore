@@ -31,6 +31,13 @@ const nextConfig = {
         hostname: "localhost",
       },
       {
+        // Cloudflare R2 dev public host (SETUP-05). Product images load from
+        // this bucket in dev; production swaps to img.<domain> in SETUP-11 /
+        // INTEGRATION-09.
+        protocol: "https",
+        hostname: "pub-1dedea628ee74e9399932493df26e28e.r2.dev",
+      },
+      {
         protocol: "https",
         hostname: "medusa-public-images.s3.eu-west-1.amazonaws.com",
       },

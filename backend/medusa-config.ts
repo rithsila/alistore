@@ -93,6 +93,56 @@ if (bakongProxyUrl) {
   )
 }
 
+// Auth Module providers (BACKEND-05B/05C). Specifying `providers` overrides the
+// framework default, so `emailpass` MUST stay listed — admin login + MFA
+// (security.md) depend on it. The Facebook and Google providers are each added
+// only when their credentials are present (mirrors the conditional file/payment
+// modules above) so dev boot never fails on missing social secrets; each
+// callback URL must match the redirect_uri the respective start route sends
+// (FB_OAUTH_REDIRECT_URI / GOOGLE_OAUTH_REDIRECT_URI), validated there.
+const fbAppId = process.env.FB_APP_ID
+const fbAppSecret = process.env.FB_APP_SECRET
+const fbCallbackUrl =
+  process.env.FB_OAUTH_REDIRECT_URI ||
+  "http://localhost:9000/store/auth/facebook/callback"
+
+const googleClientId = process.env.GOOGLE_CLIENT_ID
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
+const googleCallbackUrl =
+  process.env.GOOGLE_OAUTH_REDIRECT_URI ||
+  "http://localhost:9000/store/auth/google/callback"
+
+const authProviders: Record<string, unknown>[] = [
+  { resolve: "@medusajs/medusa/auth-emailpass", id: "emailpass" },
+]
+if (fbAppId && fbAppSecret) {
+  authProviders.push({
+    resolve: "./src/modules/auth-facebook",
+    id: "facebook",
+    options: {
+      clientId: fbAppId,
+      clientSecret: fbAppSecret,
+      callbackUrl: fbCallbackUrl,
+    },
+  })
+}
+if (googleClientId && googleClientSecret) {
+  authProviders.push({
+    resolve: "@medusajs/medusa/auth-google",
+    id: "google",
+    options: {
+      clientId: googleClientId,
+      clientSecret: googleClientSecret,
+      callbackUrl: googleCallbackUrl,
+    },
+  })
+}
+
+const authModule = {
+  resolve: "@medusajs/medusa/auth",
+  options: { providers: authProviders },
+}
+
 const paymentModule = {
   resolve: "@medusajs/medusa/payment",
   options: {
@@ -128,6 +178,7 @@ module.exports = defineConfig({
   modules: [
     ...redisModules,
     ...fileModules,
+    authModule,
     paymentModule,
     // Custom stock ledger module (SETUP-06). Always loaded; migrations for its
     // stock_movement table are generated/applied in SETUP-08.

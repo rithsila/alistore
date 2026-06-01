@@ -188,72 +188,101 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/api/store/payments/khqr/status/route.ts`
 - **Acceptance Criteria**: Simulated sandbox payment flips status to `paid`, order becomes `paid`, one `out` movement is recorded.
 
-### BACKEND-04: COD order endpoint
+### ✅ BACKEND-04: COD order endpoint
 
+- **Completed 2026-06-01** — `POST /store/orders/cod` places an unpaid (manual `pp_system_default` session) order via `completeCartWorkflow`, which reserves inventory and emits `order.placed`; pre-check + completion-catch return 409 out-of-stock; contact details persisted to order metadata; idempotent on re-submit.
 - **Objective**: Place a cash-on-delivery order.
 - **Requirements**: `POST /store/orders/cod` body `{cart_id, phone, name, address, note}` → `{order_id, status:"pending_confirmation"}`; reserve inventory; mark unpaid; error 409 out-of-stock. Emits an order-placed event.
 - **Dependencies**: BACKEND-01
 - **Deliverables**: `src/api/store/orders/cod/route.ts`
 - **Acceptance Criteria**: Endpoint creates an order with status `pending_confirmation` and reserved stock.
 
-### BACKEND-05: Facebook OAuth — start
+### ✅ BACKEND-05: Facebook OAuth — start
 
+- **Completed 2026-06-01** — `GET /store/auth/facebook` 302-redirects to Facebook's OAuth dialog with `client_id` (`FB_APP_ID`), an allowlist-validated `redirect_uri`, minimal scopes (`email,public_profile`), and a server-generated single-use `state` stored in Redis + mirrored to an HttpOnly `SameSite=Lax` cookie for callback binding; 10/min/IP rate-limited; fails closed (503) when `FB_APP_ID` unset. Verified live: real 302 + correct `client_id`/`redirect_uri` in the `Location` header.
 - **Objective**: Begin optional social login.
 - **Requirements**: `GET /store/auth/facebook` → redirect to Facebook OAuth (uses `FB_APP_ID`).
 - **Dependencies**: SETUP-12
 - **Deliverables**: `src/api/store/auth/facebook/route.ts`
 - **Acceptance Criteria**: Hitting the route 302-redirects to Facebook with correct client_id + redirect_uri.
 
-### BACKEND-05B: Facebook OAuth — callback
+### ✅ BACKEND-05B: Facebook OAuth — callback
 
+- **Completed 2026-06-01** — `GET /store/auth/facebook/callback` verifies BACKEND-05's `state` (query == `_fb_oauth_state` cookie + live Redis entry, consumed single-use), calls `authModule.validateCallback("facebook", …)`, then creates a **new, unlinked** customer via `createCustomerAccountWorkflow` (or reuses by immutable `provider_user_id`) — never auto-links by email (409 on collision, per security.md) — writes one `customer_social_identity` row, establishes a session via `req.session.auth_context` (HttpOnly `connect.sid`, no token in body), and returns `{customer}`. Scope was expanded (user-approved) to a real Facebook Auth provider: `src/modules/auth-facebook/` (ports `@medusajs/auth-google`) registered in `medusa-config.ts` alongside `emailpass` (admin MFA preserved). Verified: `tsc` clean; server boots with the new auth config (emailpass+facebook load, no errors); callback route reachable; state/CSRF rejection works (401 `authentication_failed` / `invalid_state`). **Not runtime-proven:** the full FB happy-path (real login → customer + social row + session) needs real `FB_APP_ID`/`FB_APP_SECRET` + a consenting Facebook user — verify with real credentials before go-live. Follow-ups: add `FB_OAUTH_REDIRECT_URI` to `.env.template` and set per env; re-verify admin login + MFA after the auth-module change.
 - **Objective**: Complete login and link identity.
 - **Requirements**: `GET /store/auth/facebook/callback?code=` → exchange code, upsert `customer`, create `customer_social_identity` (`provider=facebook`, `provider_user_id`), return session + `{customer}`; error 401 on failure.
 - **Dependencies**: BACKEND-05, SETUP-07
 - **Deliverables**: `src/api/store/auth/facebook/callback/route.ts`
 - **Acceptance Criteria**: A test FB login creates a customer + one `customer_social_identity` row and returns a session.
 
-### BACKEND-06: Invoice (VAT-ready HTML)
+### ✅ BACKEND-05C: Google OAuth — start
 
+- **Completed 2026-06-01** — `GET /store/auth/google` 302-redirects to Google's OAuth dialog (`https://accounts.google.com/o/oauth2/v2/auth`) with `client_id` (`GOOGLE_CLIENT_ID`), an allowlist-validated `redirect_uri` (server config, never the Host header; https-except-localhost, no userinfo, exact callback path), `scope=email profile openid`, `response_type=code`, and a server-generated single-use 256-bit `state` stored in the Cache module (`google:oauth:state:`, 600s TTL) and mirrored to an HttpOnly `SameSite=Lax` cookie (`_google_oauth_state`) — mirrors BACKEND-05's mechanism exactly. 10/min/IP rate-limited; fails closed (503) when `GOOGLE_CLIENT_ID` unset, 500 on redirect-uri misconfig. Built-in `@medusajs/auth-google` (v2.15.3, already installed — no new dep) registered in the Auth Module `providers` array, conditional on `GOOGLE_CLIENT_ID`+`GOOGLE_CLIENT_SECRET`, alongside `emailpass` (admin MFA preserved) + `facebook`. `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_OAUTH_REDIRECT_URI` added to `.env.template` (no values). Verified live: `tsc` clean; server boots with the google provider loaded; route returns a real 302 with correct `client_id` + `redirect_uri` + `state`-matched cookie (publishable-key gated). Callback (BACKEND-05D, with its open ⚠️ design decision) and the storefront Google-login button are out of scope here.
+- **Objective**: Begin optional Google social login (parallel to the Facebook flow, BACKEND-05).
+- **Requirements**: `GET /store/auth/google` → 302 redirect to Google OAuth (uses `GOOGLE_CLIENT_ID`). Generate a server-side, single-use, session-bound `state` stored in Redis + an HttpOnly `SameSite=Lax` cookie (mirror BACKEND-05's mechanism exactly). `redirect_uri` comes from server config validated against a hard-coded allowlist — never the request Host header. Scopes: `email profile openid` only (the minimal set the built-in Google provider uses). Rate limit 10/min/IP. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` to `.env.template` (no values committed). Register the built-in `@medusajs/auth-google` provider in the Auth Module `providers` array in `medusa-config.ts` (conditional on creds present, alongside `emailpass` + `facebook`).
+- **Dependencies**: SETUP-12, BACKEND-05B (reuses the Auth Module `providers` array and the state/cookie pattern established for Facebook).
+- **Deliverables**: `src/api/store/auth/google/route.ts`; `medusa-config.ts` (add `google` provider); `.env.template` (Google env keys).
+- **Acceptance Criteria**: Hitting the route 302-redirects to Google with correct `client_id` + `redirect_uri`.
+
+### ✅ BACKEND-05D: Google OAuth — callback
+
+- **Completed 2026-06-01** — `GET /store/auth/google/callback?code=&state=` completes the BACKEND-05C flow using **approach (b)** (user-confirmed auth decision): the route is the CSRF authority and does the Google exchange/verify itself rather than the built-in provider's `validateCallback` (whose own state check conflicts with our route-owned state). Flow: (1) verify `state` — query == HttpOnly `_google_oauth_state` cookie **and** live Cache/Redis entry (`google:oauth:state:`), then consume single-use + clear cookie; (2) exchange `code` at the hard-coded `https://oauth2.googleapis.com/token` (secrets in POST body, `redirect:"error"`), verify the `id_token` claims `aud`/`iss`/`exp`/`email_verified` via `jwt.decode` (no JWKS round-trip — token arrives directly from Google over TLS, OIDC §3.1.3.7; `jsonwebtoken` already installed, no new dep); (3) retrieve-or-create an `auth_identity` keyed by the immutable Google `sub`; (4) resolve customer — returning user matched by `provider_user_id`/`app_metadata.customer_id` only, **never** auto-linked by email (409 `email_conflict`), else new `customer` via `createCustomerAccountWorkflow` + one `customer_social_identity(provider=google, provider_user_id)`; (5) session via `req.session.auth_context` (HttpOnly cookie, no token in body) returning `{customer}`. All failures → 401 `{error, request_id}`; 503 when creds unset; 10/min/IP rate limit; no PII/tokens logged. The built-in `@medusajs/auth-google` (05C) stays registered but unused here. Verified live: `tsc` clean; server boots with the provider; forged state → 401 `invalid_state`; missing params → 401 `authentication_failed`; a **valid** state from `/start` passes CSRF then fails token exchange on a fake code (401 `authentication_failed`); replayed state → 401 `invalid_state` (single-use). **Not runtime-proven:** the full happy-path (real login → customer + social row + session) needs real `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` + a consenting Google user — verify with real credentials before go-live (same caveat as BACKEND-05B). Storefront button/wiring/test tracked as `FRONTEND-17B`/`INTEGRATION-06B`/`TEST-08B`.
+- **Objective**: Complete Google login and link identity.
+- **Requirements**: `GET /store/auth/google/callback?code=` → verify the BACKEND-05C `state` (query `state` == cookie **and** live Redis entry, then consume — single-use CSRF), exchange the code + read the verified Google profile, then resolve the customer: match a returning user by the immutable `provider_user_id` only; otherwise create a **new, unlinked** `customer` and one `customer_social_identity` (`provider=google`, `provider_user_id`). **Never auto-link to a pre-existing customer by email** (security.md account-link safety — same rule as BACKEND-05B; 409 on email collision). Establish a real session (`req.session.auth_context` → HttpOnly cookie, no token in the body) and return `{customer}`; error 401 on failure.
+- **Dependencies**: BACKEND-05C, SETUP-07.
+- **Deliverables**: `src/api/store/auth/google/callback/route.ts`.
+- **Acceptance Criteria**: A test Google login creates a customer + one `customer_social_identity` row (`provider=google`) and returns a session.
+- **⚠️ Design note (resolve before implementing)**: Medusa's built-in Google provider (`@medusajs/auth-google`) enforces its **own** OAuth `state` via the provider's `authenticate()`/`getState()` — which is incompatible with the custom `/store/auth/google` routes that own their own state (the same mismatch hit in BACKEND-05B). The implementer must pick one: (a) add a thin custom Google provider that performs the code/`id_token` exchange but skips the provider-level state check (mirroring `src/modules/auth-facebook/`, letting the route be the CSRF authority), or (b) perform the Google token + `id_token` verification directly in the callback route. STOP and confirm the approach (auth decision) before coding.
+- **Related (storefront)**: a Google login button + wiring is required for end-user access — tracked as `FRONTEND-17B` (button), `INTEGRATION-06B` (wiring), and `TEST-08B` (test), parallel to the Facebook `FRONTEND-17`/`INTEGRATION-06`/`TEST-08`. Out of scope for these two backend tasks.
+
+### ✅ BACKEND-06: Invoice (VAT-ready HTML)
+
+- **Completed 2026-06-01** — `GET /store/orders/:id/invoice?token=` returns a printable, self-contained HTML invoice (header, order #/date, line items, subtotal, delivery, total) with an **optional VAT line + TIN that are OFF by default** in v1 (env-gated `INVOICE_VAT_ENABLED`; `VAT_RATE` default 0.10; computed display-only since Medusa tax stays off). Auth is the security.md order-token: a 256-bit `crypto.randomBytes(32)` base64url token minted once at order creation (COD `BACKEND-04` + KHQR finalize `BACKEND-03B` now call the shared `src/lib/order-token.ts` `ensureInvoiceToken`, persist it to `order.metadata`, and return `invoice_token` in their responses), verified here in constant time (`timingSafeEqual`) with 30-day expiry + admin-revocable flag. All dynamic values HTML-escaped (XSS-safe); response is `no-store` + `nosniff`; inherits Medusa's store publishable-key gate; 60/min/IP rate limit. Verified live (booted server, real persisted order, real minted token): 200 `text/html` with correct headers + valid doctype + line items/unit prices/delivery/contact rendered; **VAT line absent when disabled**; 403 wrong token, 404 unknown order, 400 missing token, 400 missing publishable key. Token verifier unit-checked (valid/wrong/wrong-length/expired/revoked/missing all correct); template math unit-checked ($49.50 subtotal / $51.00 total / $55.95 with VAT + TIN). **Note:** a fully cart-completed order (non-zero computed aggregate totals) could not be produced in dev because no shipping option covers Cambodia (a SETUP/seed gap, not a BACKEND-06 defect) — the route faithfully renders the order's computed fields (`shipping_total` + `unit_price` render correctly through the same path; the test order's `item_total` was genuinely 0 in the DB), so totals display correctly on a completed order. Storefront link wiring is `INTEGRATION-07`; spec tests are `TEST-07`.
 - **Objective**: Render a printable invoice per order.
 - **Requirements**: `GET /store/orders/:id/invoice` (order-token auth) → printable HTML with line items, delivery fee, total; include an optional **VAT line at 10% (Cambodia standard)** + TIN field, hidden/0 by default (TIN provided when enabling); errors 403/404.
 - **Dependencies**: BACKEND-04
 - **Deliverables**: `src/api/store/orders/[id]/invoice/route.ts`, `src/lib/invoice-template.ts`
 - **Acceptance Criteria**: Endpoint returns valid HTML for a real order; VAT line absent when disabled.
 
-### BACKEND-07: Stock movements + auto stock-out
+### ✅ BACKEND-07: Stock movements + auto stock-out
 
+- _Completed 2026-06-01 — `POST /admin/stock-movements` (`src/api/admin/stock-movements/route.ts`): zod-validated body `{variant_id, type, quantity, reason}`, resolves the variant's inventory item + location level via `query.graph`, adjusts the level through the built-in `updateInventoryLevelsWorkflow` (in→+q, out→−q with 400 `insufficient_stock` guard, adjust→absolute), and writes one `stock_movement` row stamped `created_by = admin actor_id`; admin-session rate limit 60/min. `src/modules/stock-movement/service.ts` gained `recordMovement(...)` + `recordStockOut({variant_id, quantity, order_id, created_by, reason?})` — the `type=out` helper for BACKEND-03B/04 at order commit. `npx tsc --noEmit` clean; live dev server returns 401 to an unauthenticated POST (route registered + admin-guarded). ⚠️ The authenticated end-to-end "+10 + one row" observation was NOT runtime-executed (needs an admin MFA session + seeded variant, unavailable this session) — defer to UAT/TEST. `adjust`/`out` numeric direction assumed (only `in` is in the acceptance criterion)._
 - **Objective**: Admin stock-in endpoint and automatic stock-out on order.
 - **Requirements**: `POST /admin/stock-movements` (admin auth) body `{variant_id, type, quantity, reason}` → adjusts the variant `inventory_level` and writes a `stock_movement` row; provide a service method reused by BACKEND-03B/04 to write `type=out` on order commit with `order_id` + `created_by`.
 - **Dependencies**: SETUP-08
 - **Deliverables**: `src/api/admin/stock-movements/route.ts`, `src/modules/stock-movement/service.ts`
 - **Acceptance Criteria**: Posting `type=in, quantity=10` raises the inventory level by 10 and inserts one movement row.
 
-### BACKEND-08: Sales report endpoint
+### ✅ BACKEND-08: Sales report endpoint
 
+- _Completed 2026-06-01 — `GET /admin/reports/sales?from=&to=` (`src/api/admin/reports/sales/route.ts`): zod-validated optional ISO `from`/`to` window (parseable + `from ≤ to`), admin-guarded (`/admin/*`) with a defensive `actor_id` check + 60/min/admin-session rate limit. Sweeps in-range orders via `query.graph` (paged 200; `created_at $gte/$lte`) and aggregates → `{ from, to, orders, revenue, top_variants[] }`. Qualification "paid OR not-cancelled" (locked this task): an order counts when `payment_status==="captured"` OR `status!=="canceled"`. `revenue` is grouped by `currency_code` with no cross-currency conversion (locked decision — summing USD+KHR is meaningless); `top_variants` ranked by units sold (currency-agnostic), top 10 `{variant_id,title,quantity}`; per-currency revenue rounded to cents. `npx tsc --noEmit` clean; live dev server returns **401** to an unauthenticated GET (route registered + admin-guarded). ⚠️ The numeric "count + revenue match" was NOT runtime-executed — needs an admin MFA session + a known set of seeded **paid** orders; a fully captured dev order is blocked by the same seed gap noted in BACKEND-06 (no Cambodia shipping option), and this match is a declared dependency of TEST-04. Two acceptance-affecting ambiguities (order qualification + multi-currency revenue shape) were resolved by the user, not assumed._
 - **Objective**: Period revenue/order summary.
 - **Requirements**: `GET /admin/reports/sales?from=&to=` (admin) → `{orders, revenue, top_variants[]}` aggregating paid/confirmed orders in range.
 - **Dependencies**: BACKEND-03B, BACKEND-04
 - **Deliverables**: `src/api/admin/reports/sales/route.ts`
 - **Acceptance Criteria**: For a known set of test orders, `orders` count and `revenue` total match.
 
-### BACKEND-08B: Stock report endpoint
+### ✅ BACKEND-08B: Stock report endpoint
 
+- **Completed 2026-06-01** — `GET /admin/reports/stock?low_threshold=5` (`src/api/admin/reports/stock/route.ts`): admin-guarded (`/admin/*` + defensive `actor_id` check), zod-validated query (`low_threshold` optional digits-only non-negative integer; rejects negatives/junk), 60/min/admin-session rate limit, `{ error, request_id }` errors only. Sweeps all variants via `query.graph` (paged 200), sums each variant's `inventory_items.inventory.location_levels.stocked_quantity` (PRD §4 "stock truth"), and returns `{ threshold, levels[], low_stock[] }` with rows `{ variant_id, title, sku, quantity }`; `low_stock[] = levels.filter(quantity <= threshold)`, sorted most-urgent-first. Threshold from `low_threshold` else `getLowStockThreshold()` (BACKEND-01 `LOW_STOCK_THRESHOLD`, default 5). Variants with no inventory level are omitted (no stock truth → not falsely flagged). Metric = stocked quantity (not available/reserved), per PRD §3.4/§4; no extras added. `npx tsc --noEmit` clean. ⚠️ The live numeric "at/below appears, others don't" observation was NOT runtime-executed — needs an admin MFA session + seeded variants at known levels (same dev-env limitation as BACKEND-07/08); the `<=` filter satisfies it by logic, deferred to TEST-04.
 - **Objective**: Current stock + low-stock list.
 - **Requirements**: `GET /admin/reports/stock?low_threshold=5` (admin) → `{levels[], low_stock[]}`; default threshold from BACKEND-01.
 - **Dependencies**: BACKEND-07
 - **Deliverables**: `src/api/admin/reports/stock/route.ts`
 - **Acceptance Criteria**: Variants at/below threshold appear in `low_stock[]`; others don't.
 
-### BACKEND-09: Telegram order alert (subscriber)
+### ✅ BACKEND-09: Telegram order alert (subscriber)
 
+- _Completed 2026-06-01 — `src/subscribers/order-placed.ts` listens on the `order.placed` event (emitted by `completeCartWorkflow` for both COD/BACKEND-04 and KHQR/BACKEND-03B). Resolves the full order via `query.graph` and POSTs a plain-text alert to the Telegram Bot API (`https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage`, `chat_id=TELEGRAM_CHAT_ID`) with order # (`display_id`), line items (`title — variant_title ×qty`), total **USD + KHR** (KHR via BACKEND-01 `usdToKhr`, whole riel), payment method (COD via `metadata.payment_method`/`pp_system_default`; KHQR via `pp_bakong_khqr`), and customer name/phone/address/note (preferring COD `metadata.cod_contact`, falling back to `shipping_address`). **Retry on send failure** = 3 attempts + linear backoff + 10s/attempt timeout. Security (security.md): phone/address/note only in the private-chat message, never logged; bot token never logged; hard-coded Telegram host (no SSRF); plain text (no `parse_mode`); in-process 30/min send budget; subscriber never throws; no-ops with a warning when the two secrets are unset (CLARIFY-06: builds against placeholders). `npx tsc --noEmit` clean. ⚠️ The live "posts a message to the configured chat" observation was NOT runtime-executed — `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are deploy-time secrets absent in dev, and a fully cart-completed dev order is blocked by the same seed gap noted in BACKEND-06/07/08 (no Cambodia shipping option). Defer the live send to UAT with real credentials._
 - **Objective**: Notify the team on every placed order.
 - **Requirements**: Subscriber on the order-placed event → POST to Telegram Bot API (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) to a private chat with full order details (order #, items, total USD+KHR, payment method, customer name, phone, address, note); retry on send failure.
 - **Dependencies**: BACKEND-04
 - **Deliverables**: `src/subscribers/order-placed.ts`
 - **Acceptance Criteria**: Placing a COD order posts a message to the configured chat.
 
-### BACKEND-10: Reservation expiry job
+### ✅ BACKEND-10: Reservation expiry job
 
+- **Completed 2026-06-01** — `src/jobs/expire-reservations.ts` releases the `/start` reservation and deletes the stale pending Bakong session for expired, unpaid, not-completed KHQR carts (no order exists pre-verify per locked PRD §4; "cancel order" reconciled to "cancel pending session" — confirmed with operator).
 - **Objective**: Release stock from unpaid KHQR orders.
 - **Requirements**: Scheduled job releasing reservations + cancelling orders still `pending_payment` past the KHQR `expires_at`.
 - **Dependencies**: BACKEND-03B
@@ -400,6 +429,14 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/components/checkout/FacebookLogin.tsx`
 - **Acceptance Criteria**: Button initiates the FB flow; returned name prefills the form.
 
+### FRONTEND-17B: Google login button
+
+- **Objective**: Optional social sign-in (parallel to FRONTEND-17, Facebook).
+- **Requirements**: "Continue with Google" linking to `/store/auth/google` (BACKEND-05C); prefills name on return. Reuse the same login-button placement/pattern as `FacebookLogin`; do not introduce a third-party social-button library (design.md). Accent color is NOT used (reserved for sale price + KHQR CTA).
+- **Dependencies**: FRONTEND-16, BACKEND-05C
+- **Deliverables**: `src/components/checkout/GoogleLogin.tsx`
+- **Acceptance Criteria**: Button initiates the Google flow (`/store/auth/google`); returned name prefills the form.
+
 ### FRONTEND-18: KHQR pay screen
 
 - **Objective**: Show QR and await payment.
@@ -491,6 +528,14 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Dependencies**: FRONTEND-17, BACKEND-05B
 - **Deliverables**: `src/lib/auth.ts`
 - **Acceptance Criteria**: Completing FB login returns to checkout with the name prefilled.
+
+### INTEGRATION-06B: Google login wiring
+
+- **Objective**: End-to-end Google social login (parallel to INTEGRATION-06, Facebook).
+- **Requirements**: Wire button → BACKEND-05C/05D → session → prefilled form. Reuse `src/lib/auth.ts` (extend, do not fork) so Facebook and Google share the post-login session/prefill handling.
+- **Dependencies**: FRONTEND-17B, BACKEND-05D
+- **Deliverables**: `src/lib/auth.ts`
+- **Acceptance Criteria**: Completing Google login returns to checkout with the name prefilled.
 
 ### INTEGRATION-07: Invoice link wiring
 
@@ -591,6 +636,14 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Dependencies**: INTEGRATION-06
 - **Deliverables**: `tests/fb-login.spec.ts`
 - **Acceptance Criteria**: One identity row created; session returned.
+
+### TEST-08B: Google login
+
+- **Objective**: Verify Google social login (parallel to TEST-08, Facebook).
+- **Requirements**: Complete Google login (test OAuth client) → customer + `customer_social_identity` row (`provider=google`).
+- **Dependencies**: INTEGRATION-06B
+- **Deliverables**: `tests/google-login.spec.ts`
+- **Acceptance Criteria**: One identity row created (`provider=google`); session returned.
 
 ### TEST-09: Responsive & in-app browser
 
