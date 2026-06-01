@@ -170,8 +170,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `imports/products-template.csv`, `docs/import.md`
 - **Acceptance Criteria**: Importing the template creates products with variants and inventory levels; variants visible in `/store/products`.
 
-### BACKEND-03: Bakong KHQR payment provider — start
+### ✅ BACKEND-03: Bakong KHQR payment provider — start
 
+- _Completed 2026-06-01 — Custom Medusa payment provider `bakong-payment` (`pp_bakong_khqr`) with **vendored** KHQR generation (EMVCo TLV + CRC-16/CCITT-FALSE + md5 reference; no `bakong-khqr` package, per security.md) and an SSRF-guarded proxy client for the deeplink. `POST /store/payments/khqr/start` ({cart_id, currency}) reserves stock (409 out-of-stock), creates payment_collection + Bakong payment_session (native model — order created at completion per PRD §4), and returns {qr, deeplink, reference, expires_at} (deeplink null in sandbox; 502 when proxy configured-but-down). zod validation + per-IP rate limits (5/min, 20/hr) via cache module. `npm run build` green; QR verified structurally valid (correct tag order, CRC recomputes, reference = md5(qr)). NOTE: live HTTP round-trip against a seeded stocked cart not executed in-session (verified at generation+build layer). Verify/capture/stock-out = BACKEND-03B; reservation reconciliation/release = BACKEND-03B/BACKEND-10. Docs: `docs/payments-khqr.md`._
 - **Objective**: Generate a dynamic KHQR + deeplink for a cart.
 - **Requirements**: Custom payment module `bakong-payment` using `bakong-khqr`; call Bakong through `BAKONG_PROXY_URL`; account type Individual (config). Implements `POST /store/payments/khqr/start` body `{cart_id, currency}` → `{qr, deeplink, reference, expires_at}`; reserve inventory; create order `pending_payment`; errors 409 out-of-stock, 502 proxy/Bakong down.
 - **Dependencies**: BACKEND-01, SETUP-03 (Bakong creds/proxy are deploy-time .env secrets — sandbox until provided)

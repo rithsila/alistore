@@ -70,6 +70,31 @@ const fileModules =
       ]
     : []
 
+// Bakong KHQR payment provider (BACKEND-03). Registered under Medusa's Payment
+// Module so the cart uses payment_collection / payment_session (PRD §4, native
+// model). The provider id resolves to `pp_bakong_khqr`. Secrets (BAKONG_ACCOUNT,
+// token, proxy) stay in .env; merchant name/city default for the Phnom Penh shop
+// and may be overridden per environment. QR expiry aligns with the 20-min
+// reservation TTL (security.md).
+const paymentModule = {
+  resolve: "@medusajs/medusa/payment",
+  options: {
+    providers: [
+      {
+        resolve: "./src/modules/bakong-payment",
+        id: "khqr",
+        options: {
+          bakongAccount: process.env.BAKONG_ACCOUNT || "",
+          merchantName: process.env.BAKONG_MERCHANT_NAME || "Ali Store",
+          merchantCity: process.env.BAKONG_MERCHANT_CITY || "Phnom Penh",
+          expiresInMinutes:
+            Number(process.env.BAKONG_QR_EXPIRES_MINUTES) || 20,
+        },
+      },
+    ],
+  },
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -86,6 +111,7 @@ module.exports = defineConfig({
   modules: [
     ...redisModules,
     ...fileModules,
+    paymentModule,
     // Custom stock ledger module (SETUP-06). Always loaded; migrations for its
     // stock_movement table are generated/applied in SETUP-08.
     { resolve: "./src/modules/stock-movement" },
