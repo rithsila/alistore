@@ -19,7 +19,7 @@ This is a **spec-driven** project. The Medusa backend is scaffolded at `backend/
 Two separate repos:
 
 - **`backend/`** — Medusa v2.15.3 (admin MFA enabled), Node 20 LTS, TypeScript. Runs on a Proxmox VM in Cambodia. Hosts the Medusa Admin (built-in).
-- **`storefront/`** — Next.js 15 (App Router), React 19, Tailwind CSS v4. Deployed on Vercel. Started from the official Medusa Next.js Starter.
+- **`storefront/`** — Next.js 15 (App Router), React 19, Tailwind CSS v3.4.19 (design tokens in `tailwind.config.js`, not v4 `@theme`). Deployed on Vercel. Started from the official Medusa Next.js Starter.
 
 ```
 Customer phone → shop.<domain> (Vercel/Next.js) → Medusa backend (Proxmox VM)

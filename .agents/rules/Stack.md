@@ -4,7 +4,7 @@
 
 * **Backend** : Medusa **v2.15.3** (pinned exact; MFA-capable patch; still outside the post-v2.13.6 migration-bug window), Node  **20 LTS** , TypeScript (strict)
 * **Storefront** : Next.js **15** (App Router), React 19, TypeScript (strict)
-* **Styling** : Tailwind CSS **v4** (CSS-based `@theme` tokens from `DESIGN.md`)
+* **Styling** : Tailwind CSS **v3.4.19** (JS-config design tokens in `tailwind.config.js`, mapped from `DESIGN.md`)
 * **Database** : Postgres. **Current dev = Postgres on the Proxmox VM (Cambodia)** — the LAN host in `DATABASE_URL`; the agent MAY run migrations against it. **Production (after go-live) = Supabase** — human-only migrations. Single `DATABASE_URL` per environment.
 * **Cache/events** : Redis (Medusa event bus + workflow engine)
 * **File storage** : Cloudflare **R2** via Medusa S3 file provider; served through Cloudflare CDN on `img.<domain>`
@@ -42,7 +42,7 @@ Custom modules in v1: `bakong-payment`, `stock-movement`, `social-identity`.
 * `components/layout/` — `TopNav`, `Footer`, `Hero`, `BottomBar`
 * `components/checkout/` — `DeliveryForm`, `FacebookLogin`
 * `lib/` — client helpers (`medusa.ts`, `cart.ts`, `checkout.ts`, `price.ts`, `auth.ts`, `fonts.ts`)
-* `styles/globals.css` — Tailwind v4 `@theme` design tokens
+* `tailwind.config.js` — design tokens (`extend.colors` / `spacing` / `borderRadius`); `styles/globals.css` — base + utilities
 
 ## Conventions
 

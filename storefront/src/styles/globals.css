@@ -66,47 +66,23 @@
     @apply text-xs leading-5 font-normal;
   }
 
-  .text-small-semi {
-    @apply text-xs leading-5 font-semibold;
-  }
-
   .text-base-regular {
     @apply text-sm leading-6 font-normal;
-  }
-
-  .text-base-semi {
-    @apply text-sm leading-6 font-semibold;
   }
 
   .text-large-regular {
     @apply text-base leading-6 font-normal;
   }
 
-  .text-large-semi {
-    @apply text-base leading-6 font-semibold;
-  }
-
   .text-xl-regular {
     @apply text-2xl leading-[36px] font-normal;
-  }
-
-  .text-xl-semi {
-    @apply text-2xl leading-[36px] font-semibold;
   }
 
   .text-2xl-regular {
     @apply text-[30px] leading-[48px] font-normal;
   }
 
-  .text-2xl-semi {
-    @apply text-[30px] leading-[48px] font-semibold;
-  }
-
   .text-3xl-regular {
     @apply text-[32px] leading-[44px] font-normal;
-  }
-
-  .text-3xl-semi {
-    @apply text-[32px] leading-[44px] font-semibold;
   }
 }

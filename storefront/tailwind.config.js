@@ -21,19 +21,28 @@ module.exports = {
         padding: "padding-top padding-right padding-bottom padding-left",
       },
       colors: {
-        grey: {
-          0: "#FFFFFF",
-          5: "#F9FAFB",
-          10: "#F3F4F6",
-          20: "#E5E7EB",
-          30: "#D1D5DB",
-          40: "#9CA3AF",
-          50: "#6B7280",
-          60: "#4B5563",
-          70: "#374151",
-          80: "#1F2937",
-          90: "#111827",
-        },
+        // Ali Store design tokens (FRONTEND-01 / DESIGN.md) — Nike palette + coral accent.
+        // accent (#C0461F) is reserved for sale price + the "Pay with KHQR" CTA only.
+        ink: "#111111",
+        canvas: "#ffffff",
+        "soft-cloud": "#f5f5f5",
+        hairline: "#cacacb",
+        "hairline-soft": "#e5e5e5",
+        mute: "#707072",
+        success: "#007d48",
+        accent: "#C0461F",
+      },
+      // Ali Store 8px spacing scale (DESIGN.md §"Spacing System"). Additive named tokens;
+      // Tailwind's default numeric scale (gap-2 = 8px, p-4 = 16px, …) remains available.
+      spacing: {
+        xxs: "2px",
+        xs: "4px",
+        sm: "8px",
+        md: "12px",
+        lg: "18px",
+        xl: "24px",
+        xxl: "30px",
+        section: "48px",
       },
       borderRadius: {
         none: "0px",
@@ -42,6 +51,8 @@ module.exports = {
         rounded: "8px",
         large: "16px",
         circle: "9999px",
+        // Pill radius for all CTAs (FRONTEND-01).
+        pill: "999px",
       },
       maxWidth: {
         "8xl": "100rem",
