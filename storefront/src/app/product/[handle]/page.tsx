@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { use, useEffect, useState } from "react"
+import Link from "next/link"
 
 import TopNav from "../../../components/layout/TopNav"
 import Gallery from "../../../components/product/Gallery"
@@ -8,95 +9,146 @@ import VariantPicker, {
   type VariantOption,
 } from "../../../components/product/VariantPicker"
 import BuyBox from "../../../components/product/BuyBox"
+import { getProductDetail } from "@lib/medusa"
+import { addToCart } from "@lib/cart"
+import { emitCartChanged } from "@lib/cart-events"
 
 /**
- * Product detail page (FRONTEND-14) — route `/product/[handle]`.
+ * Product detail page (FRONTEND-14; product data INTEGRATION-01; cart
+ * INTEGRATION-02) — route `/product/[handle]`.
  *
  * Composes the PDP from the existing components: `Gallery` (FRONTEND-12) for the
- * images, `VariantPicker` (FRONTEND-13) for color/size/stock selection, and
- * `BuyBox` (this task) for price + buy actions.
+ * images, `VariantPicker` (FRONTEND-13) for color/size selection, and `BuyBox`
+ * (FRONTEND-14) for price + buy actions.
  *
  * Client Component because the selected-variant state is shared between the
  * picker and the buy box: `VariantPicker.onVariantChange` lifts the resolved
  * variant up here, and `BuyBox` reads `hasSelectedVariant` from it so the buy
  * actions are enabled only once a variant is chosen. Stack.md sanctions
- * `"use client"` exactly for the variant picker / interactive PDP.
+ * `"use client"` exactly for the interactive PDP.
  *
- * Placeholder data, per the FRONTEND-09/10 pattern: images use the Medusa demo
- * bucket already allow-listed in `next.config.js`. Fetching the real product by
- * the route `handle` via the Medusa SDK is INTEGRATION-phase work; this task's
- * acceptance is composition + variant-gated buttons.
+ * INTEGRATION-02 wires **Add to bag**: the picker now runs on the product's real
+ * Medusa variants (real `variant_id`s from `getProductDetail`), and adding posts
+ * the selected variant to the cart via the `@lib/cart` server action, then
+ * announces the change so the nav bag count refreshes (`@lib/cart-events`). Real
+ * per-variant **inventory** (struck/disabled sold-out) is INTEGRATION-03; the
+ * "Pay with KHQR" CTA is wired in INTEGRATION-05.
  */
 
-const DEMO_IMAGE_HOST =
-  "https://medusa-public-images.s3.eu-west-1.amazonaws.com"
+type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>
 
-const PLACEHOLDER_IMAGES = [
-  {
-    src: `${DEMO_IMAGE_HOST}/tee-black-front.png`,
-    alt: "Black classic cotton t-shirt, front view",
-  },
-  {
-    src: `${DEMO_IMAGE_HOST}/tee-black-back.png`,
-    alt: "Black classic cotton t-shirt, back view",
-  },
-]
+type AddStatus = "idle" | "adding" | "added" | "error"
 
-// colorHex carries each colorway's actual product color (swatch fill data),
-// not a chrome token; some sizes are stocked 0 to exercise the sold-out path.
-const PLACEHOLDER_VARIANTS: VariantOption[] = [
-  { id: "v-black-s", color: "Black", colorHex: "#111111", size: "S", stock: 4 },
-  { id: "v-black-m", color: "Black", colorHex: "#111111", size: "M", stock: 9 },
-  { id: "v-black-l", color: "Black", colorHex: "#111111", size: "L", stock: 0 },
-  { id: "v-white-s", color: "White", colorHex: "#ffffff", size: "S", stock: 6 },
-  { id: "v-white-m", color: "White", colorHex: "#ffffff", size: "M", stock: 0 },
-  { id: "v-white-l", color: "White", colorHex: "#ffffff", size: "L", stock: 3 },
-]
-
-const PLACEHOLDER_PRODUCT = {
-  productId: "AS-1001",
-  name: "Classic Tee",
-  price: "$29.00",
-  originalPrice: "$39.00",
+interface ProductPageProps {
+  params: Promise<{ handle: string }>
 }
 
-export default function ProductPage() {
+export default function ProductPage({ params }: ProductPageProps) {
+  const { handle } = use(params)
+
+  // `undefined` = loading, `null` = not found, object = loaded.
+  const [product, setProduct] = useState<ProductDetail | null | undefined>(
+    undefined
+  )
   const [selectedVariant, setSelectedVariant] = useState<VariantOption | null>(
     null
   )
+  const [addStatus, setAddStatus] = useState<AddStatus>("idle")
+
+  useEffect(() => {
+    let active = true
+    getProductDetail(handle).then((result) => {
+      if (active) {
+        setProduct(result)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [handle])
+
+  const handleAddToBag = async (): Promise<void> => {
+    if (!selectedVariant || addStatus === "adding") {
+      return
+    }
+    setAddStatus("adding")
+    try {
+      await addToCart({ variantId: selectedVariant.id, quantity: 1 })
+      emitCartChanged()
+      setAddStatus("added")
+    } catch {
+      setAddStatus("error")
+    }
+  }
+
+  // A fresh variant choice resets any prior add feedback.
+  const handleVariantChange = (variant: VariantOption | null): void => {
+    setSelectedVariant(variant)
+    setAddStatus("idle")
+  }
 
   return (
     <>
       <TopNav />
 
       <main className="mx-auto max-w-8xl px-4 py-section min-[600px]:px-6">
-        <div className="flex flex-col gap-section small:flex-row small:gap-xl">
-          <div className="small:flex-1">
-            <Gallery images={PLACEHOLDER_IMAGES} />
-          </div>
-
-          <div className="flex flex-col gap-6 small:flex-1">
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium leading-normal text-mute">
-                {PLACEHOLDER_PRODUCT.productId}
-              </span>
-              <h1 className="text-3xl font-medium uppercase text-ink">
-                {PLACEHOLDER_PRODUCT.name}
-              </h1>
+        {product === undefined ? (
+          <p className="text-base font-normal leading-normal text-mute">
+            Loading…
+          </p>
+        ) : product === null ? (
+          <p className="text-base font-normal leading-normal text-mute">
+            Product not found.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-section small:flex-row small:gap-xl">
+            <div className="small:flex-1">
+              <Gallery images={product.images} />
             </div>
 
-            <VariantPicker
-              variants={PLACEHOLDER_VARIANTS}
-              onVariantChange={setSelectedVariant}
-            />
+            <div className="flex flex-col gap-6 small:flex-1">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium leading-normal text-mute">
+                  {product.productId}
+                </span>
+                <h1 className="text-3xl font-medium uppercase text-ink">
+                  {product.name}
+                </h1>
+              </div>
 
-            <BuyBox
-              price={PLACEHOLDER_PRODUCT.price}
-              originalPrice={PLACEHOLDER_PRODUCT.originalPrice}
-              hasSelectedVariant={selectedVariant !== null}
-            />
+              <VariantPicker
+                variants={product.variants}
+                onVariantChange={handleVariantChange}
+              />
+
+              <BuyBox
+                price={product.price}
+                originalPrice={product.originalPrice}
+                hasSelectedVariant={selectedVariant !== null}
+                onAddToBag={handleAddToBag}
+              />
+
+              {addStatus === "added" ? (
+                <p
+                  aria-live="polite"
+                  className="text-xs font-medium leading-normal text-mute"
+                >
+                  Added to bag.{" "}
+                  <Link href="/cart" className="text-ink underline">
+                    View bag
+                  </Link>
+                </p>
+              ) : addStatus === "error" ? (
+                <p
+                  aria-live="polite"
+                  className="text-xs font-medium leading-normal text-mute"
+                >
+                  Couldn’t add to bag. Please try again.
+                </p>
+              ) : null}
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </>
   )

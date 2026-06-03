@@ -52,6 +52,12 @@ const SESSION_RATE_LIMIT = { windowMs: 3_600_000, limit: 20, ttl: 3600 } as cons
 const CART_FIELDS = [
   "id",
   "currency_code",
+  // `total` is a COMPUTED field: query.graph derives it from the selected
+  // line-item amount fields via the cart totals decorator. `items.unit_price`
+  // MUST be selected or the decorator has no amounts to sum and `total` comes
+  // back as 0 (→ a spurious `invalid_cart_total`). v1 has no promotions and tax
+  // is off, so unit_price × quantity is the whole total; add adjustment/tax
+  // line fields here if those are ever enabled.
   "total",
   "payment_collection.id",
   "payment_collection.payment_sessions.id",
@@ -60,6 +66,7 @@ const CART_FIELDS = [
   "payment_collection.payment_sessions.data",
   "items.id",
   "items.quantity",
+  "items.unit_price",
   "items.variant_id",
   "items.variant.manage_inventory",
   "items.variant.allow_backorder",

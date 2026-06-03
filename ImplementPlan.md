@@ -504,32 +504,36 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 ## Phase 4 — INTEGRATION
 
-### INTEGRATION-01: Catalog data wiring
+### ✅ INTEGRATION-01: Catalog data wiring
 
+- _Completed 2026-06-02 — `src/lib/medusa.ts` is the storefront catalog data layer: a `"use server"` module over the single configured `@lib/config` SDK, exposing `getCatalogProducts` / `getCategories` / `getCategoryProducts` / `getProductDetail`. It resolves the price region once from `/store/regions` (prefers `NEXT_PUBLIC_DEFAULT_REGION=kh` → the Cambodia/USD region, else first), reads Medusa v2 `calculated_price.calculated_amount` (major units) and formats USD via `@lib/price`'s `formatUsd`, normalizing `StoreProduct`/`StoreProductCategory` into `ProductCard`/`CategoryTabs`/`Gallery` props; products without a calculated price are skipped. Home + Category (async Server Components) and the client PDP (via the `getProductDetail` server action) now render real backend products, replacing the FRONTEND placeholder arrays. `tsc` clean; verified against the live dev backend — home renders Medusa Sweatpants/T-Shirt/Shorts/Sweatshirt at `$15.00` with SKU references, `/category/pants` renders the Pants heading + Medusa Sweatpants `$15.00`, no errors. Per-variant inventory binding (INTEGRATION-03) and cart wiring (INTEGRATION-02) intentionally left out of scope._
 - **Objective**: Real products/categories on storefront.
 - **Requirements**: Configure Medusa JS SDK client; fetch products + categories into Home/Category/PDP.
 - **Dependencies**: FRONTEND-09, FRONTEND-10, FRONTEND-14, SETUP-10
 - **Deliverables**: `src/lib/medusa.ts`
 - **Acceptance Criteria**: Catalog shows real backend products with prices.
 
-### INTEGRATION-02: Cart operations
+### ✅ INTEGRATION-02: Cart operations
 
+- _Completed 2026-06-03 — `src/lib/cart.ts` is the cart-operations layer: a `"use server"` module over the single `@lib/config` SDK exposing `addToCart` / `updateLineItem` / `removeLineItem` (create on first add, line-item add/update/delete) plus `getCart` / `getCartItemCount`, with the cart id read/written only from the `HttpOnly` `_medusa_cart_id` cookie (never client-supplied) and amounts returned as numeric USD major units. Consumer wiring (beyond the single declared deliverable, to satisfy the end-to-end acceptance — mirrors how INTEGRATION-01 wired its pages): `@lib/medusa.getProductDetail` now returns real Medusa variants (real `variant_id` + Color/Size parsed generically from variant options; placeholder stock — real inventory is INTEGRATION-03); the PDP (`product/[handle]/page.tsx`) feeds the picker real variants and wires "Add to bag" → `addToCart` → a same-tab cart-changed event (`@lib/cart-events`); `useCartCount` (`@lib/hooks/use-cart-count`) drives a live `TopNav` bag count badge linking to `/cart`; the cart page (`app/cart/page.tsx`) reads/updates/removes against the real cart; `VariantPicker` hides the colour group for size-only products. `tsc` clean; verified against the live dev backend — adding the Medusa T-Shirt (M / Black, SKU SHIRT-M-BLACK) from the PDP lands in `/cart` as a real $15.00 line (subtotal $15.00 / delivery $1.50 / total $16.50). NOTE: the catalog grid → PDP link is still unwired (cards carry no `handle`/`Link`) — a separate gap, not part of this task; PDPs are reachable by direct URL._
 - **Objective**: Wire add/update/remove.
 - **Requirements**: Cart create/line-item add/update/delete via SDK; persist cart id.
 - **Dependencies**: INTEGRATION-01, FRONTEND-15
 - **Deliverables**: `src/lib/cart.ts`
 - **Acceptance Criteria**: Adding from PDP updates cart count and cart page.
 
-### INTEGRATION-03: Variant availability wiring
+### ✅ INTEGRATION-03: Variant availability wiring
 
+- _Completed 2026-06-03 — `VariantPicker` is now driven by **real per-variant inventory** from the DB. `getProductDetail` (`@lib/medusa`) requests `+variants.inventory_quantity,+variants.manage_inventory,+variants.allow_backorder` and resolves each variant's availability via `variantStock()`: a variant that doesn't manage inventory or allows backorder is `Infinity` (always purchasable, shown as "In stock" with no count), otherwise Medusa's computed `inventory_quantity` is the available count and a non-positive/absent count ⇒ `0` (sold out). The PDP passes these `variants` (each carrying real `variant_id` + `stock`) straight into `<VariantPicker>`, which renders any size with `stock <= 0` as a disabled, `line-through opacity-50` `Chip` (`aria-label="{size}, sold out"`) and never emits it as a selectable variant; the stock note reads "{n} left" / "In stock" / "Sold out" / "Select a size" accordingly. `tsc --noEmit` clean. Verified against the live dev backend: real inventory flows through (`SHIRT-M-BLACK` returns `inventory_quantity=999996` — the live reserved-adjusted count from the INTEGRATION-02 add-to-cart test — and the unmanaged `winter` variant resolves to `Infinity`), confirming the wiring reads genuine DB inventory. NOTE: all current seed variants are in stock (≥999,996 or unlimited), so a struck pill is not observable from seed data today; the sold-out rendering is verified via the confirmed non-positive→`0` mapping (a single uniform code path) plus the component's deterministic `stock <= 0` struck/disabled branch, not a seeded zero-stock product._
 - **Objective**: Real stock in the picker.
 - **Requirements**: Bind `VariantPicker` to inventory levels per variant.
 - **Dependencies**: INTEGRATION-01, FRONTEND-13
 - **Deliverables**: `src/components/product/VariantPicker.tsx` (data wiring)
 - **Acceptance Criteria**: Out-of-stock variants from the DB render as struck/disabled.
 
-### INTEGRATION-04: COD submission
+### ✅ INTEGRATION-04: COD submission
 
+- _Completed 2026-06-03 — `storefront/src/lib/checkout.ts` (`"use server"`, COD slice) places a Cash-on-Delivery order: validates contact (security.md phone regex + optional email shape), reads `cart_id` from the HttpOnly cookie only (never client-supplied), preps the cart per BACKEND-04's locked assumption (sets email + Cambodia `kh` shipping address, adds the first `/store/shipping-options` result), POSTs `/store/orders/cod`, clears the cart cookie, and returns the new order id (errors mapped to customer-safe, PII-free messages). Consumer wiring (INTEGRATION-01/02 precedent): `DeliveryForm` gained an optional **Email** field (`DeliveryDetails.email`); the checkout page's COD branch `await`s `placeCodOrder(details)` → routes to `/order/[id]?status=cod` (FRONTEND-19 COD variant), with an `isPlacing` state + inline `role="alert"` error. Three open contract points were resolved with the user before coding: cart prep is in scope; email is an optional form field with a `<phone-digits>@guest.alistore.com` blank fallback; shipping method = first available option. Unblocked the BACKEND-06 shipping-seed gap with `backend/src/scripts/seed-shipping.ts` (idempotent: stock-location↔manual provider + sales-channel link, default shipping profile with all products linked, a `kh` fulfillment set/service zone, and a flat **$1.50** Cambodia shipping option) — run against the dev DB. Verified live end-to-end: `tsc --noEmit` clean; a `kh` cart now returns **1** shipping option (was 0); `POST /store/orders/cod` returns `status: pending_confirmation` + order id + invoice token. NOTE: the free-over-$50 / env-driven `DELIVERY_FEE` wiring and the checkout-page placeholder summary remain separate follow-ups; `seed-shipping.ts` must be re-run after any fresh DB reset (it belongs to SETUP)._
 - **Objective**: Connect checkout to BACKEND-04.
 - **Requirements**: COD path POSTs `/store/orders/cod`; on success route to confirmation (COD variant).
 - **Dependencies**: FRONTEND-16, BACKEND-04, FRONTEND-19

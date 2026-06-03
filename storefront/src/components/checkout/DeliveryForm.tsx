@@ -3,13 +3,15 @@
 import type { ChangeEvent } from "react"
 
 /**
- * Delivery information form (FRONTEND-16).
+ * Delivery information form (FRONTEND-16; Email field added in INTEGRATION-04).
  *
- * Fields: Full Name, Phone (required), Address, Note. Controlled by the parent
- * checkout page via `values` + `onChange` so the page can gate its Place-order
- * CTA on phone validity (`isValidPhone`). Presentational form only — the payment
- * choice, order summary, and submit live on the checkout page (this task's other
- * deliverable). Guest checkout v1 keys on phone, no password (PRD / CLAUDE.md).
+ * Fields: Full Name, Phone (required), Email (optional), Address, Note.
+ * Controlled by the parent checkout page via `values` + `onChange` so the page
+ * can gate its Place-order CTA on phone validity (`isValidPhone`). Presentational
+ * form only — the payment choice, order summary, and submit live on the checkout
+ * page (this task's other deliverable). Guest checkout v1 keys on phone, no
+ * password (PRD / CLAUDE.md); email is optional and used only for the receipt
+ * (when blank, COD synthesises one from the phone — see `@lib/checkout`).
  *
  * DESIGN.md documents no checkout field component ("Form field styling … is not
  * present in the captured surfaces — only the search pill is documented"), so
@@ -35,6 +37,7 @@ export function isValidPhone(phone: string): boolean {
 export interface DeliveryDetails {
   fullName: string
   phone: string
+  email: string
   address: string
   note: string
 }
@@ -42,6 +45,7 @@ export interface DeliveryDetails {
 export const EMPTY_DELIVERY_DETAILS: DeliveryDetails = {
   fullName: "",
   phone: "",
+  email: "",
   address: "",
   note: "",
 }
@@ -116,6 +120,27 @@ export default function DeliveryForm({ values, onChange }: DeliveryFormProps) {
           {phoneTouchedInvalid
             ? "Enter a valid Cambodian number, e.g. 012 345 678 or +855 12 345 678."
             : "Cambodian number — e.g. 012 345 678 or +855 12 345 678."}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label htmlFor="delivery-email" className={LABEL}>
+          Email <span className="text-mute">(optional)</span>
+        </label>
+        <input
+          id="delivery-email"
+          name="email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          aria-describedby="delivery-email-help"
+          className={INPUT}
+          value={values.email}
+          onChange={update("email")}
+          placeholder="you@example.com"
+        />
+        <p id="delivery-email-help" className={HELPER}>
+          For your receipt — we'll still confirm by phone.
         </p>
       </div>
 

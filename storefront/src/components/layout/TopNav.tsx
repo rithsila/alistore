@@ -10,6 +10,7 @@ import {
   XMark,
 } from "@medusajs/icons"
 import Chip from "../ui/Chip"
+import { useCartCount } from "@lib/hooks/use-cart-count"
 
 /**
  * Responsive storefront header (DESIGN.md primary-nav / FRONTEND-04).
@@ -78,9 +79,41 @@ function CurrencyToggle({
   )
 }
 
+/**
+ * Bag affordance: links to `/cart` and shows a live item-count badge (ink dot,
+ * canvas numeral) once the cart is non-empty. Count is supplied by the caller so
+ * the desktop and mobile instances share one subscription.
+ */
+function BagLink({
+  count,
+  className = "",
+}: {
+  count: number
+  className?: string
+}) {
+  const label =
+    count > 0 ? `Bag, ${count} ${count === 1 ? "item" : "items"}` : "Bag"
+
+  return (
+    <Link
+      href="/cart"
+      aria-label={label}
+      className={`relative ${ICON_BUTTON} ${className}`}
+    >
+      <ShoppingBag className="h-6 w-6" />
+      {count > 0 ? (
+        <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1 text-xs font-medium leading-none text-canvas">
+          {count}
+        </span>
+      ) : null}
+    </Link>
+  )
+}
+
 export default function TopNav() {
   const [currency, setCurrency] = useState<Currency>("USD")
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const itemCount = useCartCount()
 
   const closeDrawer = () => setIsDrawerOpen(false)
 
@@ -133,19 +166,11 @@ export default function TopNav() {
           <button type="button" aria-label="Account" className={ICON_BUTTON}>
             <User className="h-6 w-6" />
           </button>
-          <button type="button" aria-label="Bag" className={ICON_BUTTON}>
-            <ShoppingBag className="h-6 w-6" />
-          </button>
+          <BagLink count={itemCount} />
         </div>
 
         {/* Mobile: bag (right) */}
-        <button
-          type="button"
-          aria-label="Bag"
-          className={`${ICON_BUTTON} -mr-3 min-[600px]:hidden`}
-        >
-          <ShoppingBag className="h-6 w-6" />
-        </button>
+        <BagLink count={itemCount} className="-mr-3 min-[600px]:hidden" />
       </nav>
 
       {/* Mobile: left slide-in drawer */}

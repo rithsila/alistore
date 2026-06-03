@@ -5,7 +5,14 @@ import { useMemo, useState } from "react"
 import Chip from "../ui/Chip"
 
 /**
- * PDP variant picker — color + size + live stock (FRONTEND-13).
+ * PDP variant picker — color + size + live stock (FRONTEND-13; real inventory
+ * wired in INTEGRATION-03).
+ *
+ * Driven by real Medusa per-variant inventory: `getProductDetail` (`@lib/medusa`)
+ * supplies each variant's live available count as `stock`, so sold-out variants
+ * from the DB render struck/disabled here. `stock` of `Infinity` marks a variant
+ * that doesn't manage inventory / allows backorder (always purchasable) and is
+ * shown as available without a count.
  *
  * - Color swatch dots (DESIGN.md `swatch-dot` / `swatch-dot-active`): each dot is
  *   filled with the colorway's actual product color (passed in as data via
@@ -17,8 +24,9 @@ import Chip from "../ui/Chip"
  *   decorative shadow).
  * - Size pills reuse the `Chip` primitive (active = ink fill). A size with no
  *   in-stock variant for the selected color is disabled + struck through.
- * - Stock note (caption-sm, mute): "{n} left" once a size is chosen, prompting
- *   "Select a size" until then; sold-out sizes are conveyed by the struck pills.
+ * - Stock note (caption-sm, mute): "{n} left" once an in-stock size is chosen
+ *   (or "In stock" when the variant is unlimited), prompting "Select a size"
+ *   until then; sold-out sizes are conveyed by the struck pills.
  *
  * Purely presentational: it owns the color/size selection state and surfaces the
  * resolved (in-stock) variant via `onVariantChange` so the PDP action block
@@ -37,7 +45,10 @@ export interface VariantOption {
   colorHex: string
   /** Size label, e.g. "M". */
   size: string
-  /** Available inventory quantity for this variant. */
+  /**
+   * Available inventory for this variant: real units left, `0` (or less) for
+   * sold out, or `Infinity` for an unlimited (unmanaged/backorder) variant.
+   */
   stock: number
 }
 
@@ -54,12 +65,15 @@ export default function VariantPicker({
   variants,
   onVariantChange,
 }: VariantPickerProps) {
-  // Unique colors in first-seen order, each carrying its swatch fill.
+  // Unique colors in first-seen order, each carrying its swatch fill. Blank
+  // color names are skipped so products with no colorway option (size-only)
+  // render the size group alone instead of an empty swatch.
   const colors = useMemo(() => {
     const seen = new Map<string, string>()
     for (const variant of variants) {
-      if (!seen.has(variant.color)) {
-        seen.set(variant.color, variant.colorHex)
+      const color = variant.color.trim()
+      if (color && !seen.has(color)) {
+        seen.set(color, variant.colorHex)
       }
     }
     return Array.from(seen, ([color, colorHex]) => ({ color, colorHex }))
@@ -118,8 +132,10 @@ export default function VariantPicker({
     stockNote = "Select a size"
   } else if (!selectedVariant || selectedVariant.stock <= 0) {
     stockNote = "Sold out"
-  } else {
+  } else if (Number.isFinite(selectedVariant.stock)) {
     stockNote = `${selectedVariant.stock} left`
+  } else {
+    stockNote = "In stock"
   }
 
   return (

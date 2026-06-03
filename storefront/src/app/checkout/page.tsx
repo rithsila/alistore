@@ -10,6 +10,7 @@ import DeliveryForm, {
   isValidPhone,
   type DeliveryDetails,
 } from "../../components/checkout/DeliveryForm"
+import { placeCodOrder } from "@lib/checkout"
 
 /**
  * Checkout page (FRONTEND-16) — route `/checkout`.
@@ -29,11 +30,14 @@ import DeliveryForm, {
  *
  * Placeholder summary, per the FRONTEND-15 precedent: amounts are in-memory USD
  * with a local formatter and the same locked delivery rule (flat $1.50, free
- * once subtotal ≥ $50 — CLARIFY-04). Reading the live cart from the Medusa SDK,
- * sourcing the fee from backend settings (BACKEND-01), POSTing the COD order
- * (`POST /store/orders/cod`) and starting KHQR are INTEGRATION-phase; this
- * task's acceptance is "submit blocked without phone; both payment options
- * selectable".
+ * once subtotal ≥ $50 — CLARIFY-04). Reading the live cart from the Medusa SDK
+ * and sourcing the fee from backend settings (BACKEND-01) remain follow-ups.
+ *
+ * COD submission is wired (INTEGRATION-04): the COD branch calls
+ * `placeCodOrder` (`@lib/checkout`), which preps the cart + POSTs
+ * `/store/orders/cod`, then routes to the COD confirmation
+ * (`/order/[id]?status=cod`). The KHQR branch still routes to `/checkout/khqr`
+ * for its start/poll wiring (INTEGRATION-05).
  */
 
 // CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
@@ -128,6 +132,8 @@ export default function CheckoutPage() {
     EMPTY_DELIVERY_DETAILS
   )
   const [payment, setPayment] = useState<PaymentMethod>("khqr")
+  const [isPlacing, setIsPlacing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const subtotal = PLACEHOLDER_SUBTOTAL
   const qualifiesForFreeDelivery = subtotal >= FREE_DELIVERY_THRESHOLD
@@ -136,15 +142,28 @@ export default function CheckoutPage() {
 
   const canPlaceOrder = isValidPhone(details.phone)
 
-  const handlePlaceOrder = () => {
-    if (!canPlaceOrder) {
+  const handlePlaceOrder = async () => {
+    if (!canPlaceOrder || isPlacing) {
       return
     }
+    setError(null)
+
     if (payment === "khqr") {
+      // KHQR start/poll is wired in INTEGRATION-05; this routes to the pay screen.
       router.push("/checkout/khqr")
+      return
     }
-    // COD order placement (`POST /store/orders/cod` → `/order/[id]`) is wired in
-    // the INTEGRATION phase; this page only collects and validates the inputs.
+
+    // COD: prep the cart + place the order (BACKEND-04), then land on the COD
+    // confirmation. On failure, surface a customer-safe message and re-enable.
+    setIsPlacing(true)
+    const result = await placeCodOrder(details)
+    if (result.ok) {
+      router.push(`/order/${result.orderId}?status=cod`)
+      return
+    }
+    setError(result.error)
+    setIsPlacing(false)
   }
 
   return (
@@ -195,12 +214,21 @@ export default function CheckoutPage() {
               Free delivery over $50
             </p>
 
+            {error && (
+              <p
+                role="alert"
+                className="text-xs font-medium leading-normal text-ink"
+              >
+                {error}
+              </p>
+            )}
+
             <PillButton
               className="w-full"
-              disabled={!canPlaceOrder}
+              disabled={!canPlaceOrder || isPlacing}
               onClick={handlePlaceOrder}
             >
-              Place order
+              {isPlacing ? "Placing order…" : "Place order"}
             </PillButton>
           </section>
         </div>

@@ -1,15 +1,24 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Plus, Minus, Trash } from "@medusajs/icons"
 
 import TopNav from "../../components/layout/TopNav"
 import PillButton from "../../components/ui/PillButton"
+import {
+  getCart,
+  updateLineItem,
+  removeLineItem,
+  type Cart,
+  type CartLine,
+} from "@lib/cart"
+import { emitCartChanged } from "@lib/cart-events"
+import { formatUsd } from "@lib/price"
 
 /**
- * Cart ("bag") page (FRONTEND-15) — route `/cart`.
+ * Cart ("bag") page (FRONTEND-15; cart operations INTEGRATION-02) — route `/cart`.
  *
  * - Line items: 1:1 product thumbnail on `soft-cloud`, name + variant label,
  *   unit price (sale items show the struck-through original in `mute` followed
@@ -19,75 +28,28 @@ import PillButton from "../../components/ui/PillButton"
  *   subtotal reaches the $50 free-delivery threshold — CLARIFY-04), total, the
  *   free-over-threshold note, and the ink Checkout `PillButton`.
  *
- * Client Component because quantity steppers and remove mutate local cart state
- * and the subtotal/fee recompute live (Stack.md sanctions `"use client"` for
- * interactive surfaces). The stepper and remove controls render inline in this
- * deliverable rather than introducing new `ui/` primitives — the same call made
- * for the inline KHQR CTA in FRONTEND-14 (BuyBox); DESIGN.md defines no cart
- * line-item or stepper component, so none is invented mid-task.
+ * Client Component because the quantity steppers and remove control mutate the
+ * cart and re-render the summary (Stack.md sanctions `"use client"` for
+ * interactive surfaces). The line is read from the real session cart via the
+ * `@lib/cart` server actions; quantity changes / removal call back through them
+ * and announce the change so the nav bag count refreshes (`@lib/cart-events`).
+ * The stepper and remove controls render inline (DESIGN.md defines no cart
+ * line-item or stepper component) — the same call made for the inline KHQR CTA.
  *
- * Placeholder lines, per the FRONTEND-09/10/14 pattern: thumbnails use the
- * Medusa demo bucket already allow-listed in `next.config.js`. Real cart
- * create/line-item add/update/delete via the Medusa SDK (and persisting the
- * cart id) is INTEGRATION-02; this task's acceptance is "qty change updates
- * subtotal; fee shows/zeroes per threshold".
+ * Currency: line amounts are USD major units from Medusa and rendered with the
+ * shared `@lib/price` `formatUsd`. The full USD/KHR toggle (FRONTEND-22) drives
+ * checkout in a later INTEGRATION task; this page renders the USD base.
  *
- * Currency: amounts are held as numeric USD and rendered with a minimal local
- * USD formatter so the subtotal can be recomputed on quantity change. The full
- * multi-currency (USD/KHR via `USD_KHR_RATE`) formatter is FRONTEND-22
- * (`src/lib/price.ts`), wired in the INTEGRATION phase.
+ * Delivery fee constants are placeholders here; sourcing them from backend
+ * settings (`DELIVERY_FEE` / `FREE_DELIVERY_THRESHOLD`, BACKEND-01) is wired with
+ * the checkout flow (INTEGRATION-04).
  */
 
-const DEMO_IMAGE_HOST =
-  "https://medusa-public-images.s3.eu-west-1.amazonaws.com"
-
 // CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
-// Sourced from env (`DELIVERY_FEE` / `FREE_DELIVERY_THRESHOLD`) via backend
-// settings (BACKEND-01) at INTEGRATION time; held as named constants on this
-// presentational placeholder page.
 const DELIVERY_FEE = 1.5
 const FREE_DELIVERY_THRESHOLD = 50
 
 const MIN_QUANTITY = 1
-
-interface CartLine {
-  id: string
-  productId: string
-  name: string
-  /** Display label for the chosen variant, e.g. "Black / M". */
-  variantLabel: string
-  imageSrc: string
-  imageAlt: string
-  /** Current unit price in USD. */
-  unitPrice: number
-  /** When set, the line is on sale: original struck in mute, current in accent. */
-  originalUnitPrice?: number
-  quantity: number
-}
-
-const PLACEHOLDER_LINES: CartLine[] = [
-  {
-    id: "line-1",
-    productId: "AS-1001",
-    name: "Classic Tee",
-    variantLabel: "Black / M",
-    imageSrc: `${DEMO_IMAGE_HOST}/tee-black-front.png`,
-    imageAlt: "Black classic cotton t-shirt, front view",
-    unitPrice: 29,
-    originalUnitPrice: 39,
-    quantity: 1,
-  },
-  {
-    id: "line-2",
-    productId: "AS-1002",
-    name: "Everyday Hoodie",
-    variantLabel: "White / L",
-    imageSrc: `${DEMO_IMAGE_HOST}/tee-white-front.png`,
-    imageAlt: "White everyday hoodie, front view",
-    unitPrice: 18,
-    quantity: 2,
-  },
-]
 
 // Small fixed thumbnail; the image fills it (1:1, soft-cloud), the container
 // width drives the responsive `sizes`.
@@ -97,11 +59,6 @@ const PRICE_TYPE = "text-base font-medium leading-normal"
 
 const STEPPER_BUTTON =
   "inline-flex h-11 w-11 items-center justify-center text-ink transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-
-/** Minimal USD display formatter (FRONTEND-22 supplies the full USD/KHR one). */
-function formatUsd(amount: number): string {
-  return `$${amount.toFixed(2)}`
-}
 
 interface UnitPriceProps {
   unitPrice: number
@@ -129,11 +86,17 @@ function UnitPrice({ unitPrice, originalUnitPrice }: UnitPriceProps) {
 
 interface CartLineRowProps {
   line: CartLine
-  onChangeQuantity: (id: string, delta: number) => void
+  busy: boolean
+  onChangeQuantity: (id: string, nextQuantity: number) => void
   onRemove: (id: string) => void
 }
 
-function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
+function CartLineRow({
+  line,
+  busy,
+  onChangeQuantity,
+  onRemove,
+}: CartLineRowProps) {
   return (
     <li className="flex gap-4 border-b border-hairline py-4">
       <div className="relative aspect-square w-20 shrink-0 bg-soft-cloud min-[600px]:w-24">
@@ -151,13 +114,16 @@ function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
           <div className="flex flex-col gap-1">
             <h2 className={`${PRICE_TYPE} text-ink`}>{line.name}</h2>
             <span className="text-xs font-medium leading-normal text-mute">
-              {line.productId} · {line.variantLabel}
+              {line.variantLabel
+                ? `${line.productId} · ${line.variantLabel}`
+                : line.productId}
             </span>
           </div>
 
           <button
             type="button"
             aria-label={`Remove ${line.name}`}
+            disabled={busy}
             onClick={() => onRemove(line.id)}
             className={STEPPER_BUTTON}
           >
@@ -179,8 +145,8 @@ function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
             <button
               type="button"
               aria-label="Decrease quantity"
-              disabled={line.quantity <= MIN_QUANTITY}
-              onClick={() => onChangeQuantity(line.id, -1)}
+              disabled={busy || line.quantity <= MIN_QUANTITY}
+              onClick={() => onChangeQuantity(line.id, line.quantity - 1)}
               className={STEPPER_BUTTON}
             >
               <Minus className="h-4 w-4" />
@@ -194,7 +160,8 @@ function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
             <button
               type="button"
               aria-label="Increase quantity"
-              onClick={() => onChangeQuantity(line.id, 1)}
+              disabled={busy}
+              onClick={() => onChangeQuantity(line.id, line.quantity + 1)}
               className={STEPPER_BUTTON}
             >
               <Plus className="h-4 w-4" />
@@ -202,7 +169,7 @@ function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
           </div>
 
           <span className={`${PRICE_TYPE} text-ink`}>
-            {formatUsd(line.unitPrice * line.quantity)}
+            {formatUsd(line.lineTotal)}
           </span>
         </div>
       </div>
@@ -212,30 +179,61 @@ function CartLineRow({ line, onChangeQuantity, onRemove }: CartLineRowProps) {
 
 export default function CartPage() {
   const router = useRouter()
-  const [lines, setLines] = useState<CartLine[]>(PLACEHOLDER_LINES)
+  // `undefined` = loading, `null`/empty = empty bag, object = loaded.
+  const [cart, setCart] = useState<Cart | null | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
 
-  const changeQuantity = (id: string, delta: number) => {
-    setLines((prev) =>
-      prev.map((line) =>
-        line.id === id
-          ? {
-              ...line,
-              quantity: Math.max(MIN_QUANTITY, line.quantity + delta),
-            }
-          : line
-      )
-    )
+  useEffect(() => {
+    let active = true
+    getCart().then((result) => {
+      if (active) {
+        setCart(result)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const changeQuantity = async (id: string, nextQuantity: number) => {
+    if (busy || nextQuantity < MIN_QUANTITY) {
+      return
+    }
+    setBusy(true)
+    try {
+      const updated = await updateLineItem({
+        lineId: id,
+        quantity: nextQuantity,
+      })
+      setCart(updated)
+      emitCartChanged()
+    } catch {
+      // Leave the cart as-is on failure; the controls re-enable below.
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const removeLine = (id: string) => {
-    setLines((prev) => prev.filter((line) => line.id !== id))
+  const removeLine = async (id: string) => {
+    if (busy) {
+      return
+    }
+    setBusy(true)
+    try {
+      const updated = await removeLineItem(id)
+      setCart(updated)
+      emitCartChanged()
+    } catch {
+      // Leave the cart as-is on failure.
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const subtotal = lines.reduce(
-    (sum, line) => sum + line.unitPrice * line.quantity,
-    0
-  )
-  const isEmpty = lines.length === 0
+  const lines = cart?.lines ?? []
+  const isLoading = cart === undefined
+  const isEmpty = !isLoading && lines.length === 0
+  const subtotal = cart?.subtotal ?? 0
   const qualifiesForFreeDelivery = subtotal >= FREE_DELIVERY_THRESHOLD
   const deliveryFee = isEmpty || qualifiesForFreeDelivery ? 0 : DELIVERY_FEE
   const total = subtotal + deliveryFee
@@ -247,7 +245,11 @@ export default function CartPage() {
       <main className="mx-auto max-w-8xl px-4 py-section min-[600px]:px-6">
         <h1 className="text-3xl font-medium uppercase text-ink">Bag</h1>
 
-        {isEmpty ? (
+        {isLoading ? (
+          <p className="py-section text-base font-normal leading-normal text-mute">
+            Loading…
+          </p>
+        ) : isEmpty ? (
           <div className="flex flex-col items-start gap-6 py-section">
             <p className="text-base font-medium leading-normal text-mute">
               Your bag is empty.
@@ -263,6 +265,7 @@ export default function CartPage() {
                 <CartLineRow
                   key={line.id}
                   line={line}
+                  busy={busy}
                   onChangeQuantity={changeQuantity}
                   onRemove={removeLine}
                 />
@@ -306,6 +309,7 @@ export default function CartPage() {
 
               <PillButton
                 className="w-full"
+                disabled={busy}
                 onClick={() => router.push("/checkout")}
               >
                 Checkout

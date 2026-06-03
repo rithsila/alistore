@@ -7,6 +7,7 @@ import { ArrowPath, ArrowUpRightOnBox, Spinner } from "@medusajs/icons"
 
 import TopNav from "../../../components/layout/TopNav"
 import PillButton from "../../../components/ui/PillButton"
+import { startKhqr, pollKhqrStatus, type KhqrSession } from "@lib/checkout"
 
 /**
  * KHQR pay screen (FRONTEND-18) — route `/checkout/khqr`.
@@ -24,61 +25,14 @@ import PillButton from "../../../components/ui/PillButton"
  * CTA — which is one of the two sanctioned accent uses in design.md. Every other
  * control (Regenerate, retry) stays on ink.
  *
- * Scope (matches the checkout page's FRONTEND-16 placeholder precedent): this
- * task delivers the SCREEN. The live `POST /store/payments/khqr/start` and
- * `GET /store/payments/khqr/status` calls are wired in INTEGRATION-05
- * (`src/lib/checkout.ts`). Until then the two seam functions below drive the
- * screen with a sample session and a perpetually-"pending" status — never a
- * fabricated "paid" (security.md: `paid` only after server verify). Their return
- * shapes already match the BACKEND-03 / BACKEND-03B contracts, so INTEGRATION-05
- * only has to replace the two function bodies with `@lib/checkout` imports.
+ * Data wiring (INTEGRATION-05): the live `POST /store/payments/khqr/start` and
+ * `GET /store/payments/khqr/status` calls live in `src/lib/checkout.ts` and are
+ * imported here as `startKhqr` / `pollKhqrStatus` (server actions). Their return
+ * shapes (`KhqrSession` / status union) match the BACKEND-03 / BACKEND-03B
+ * contracts the screen was built against, so the countdown / poll / redirect
+ * logic below is unchanged. `paid` is reported only by the server after its own
+ * Bakong verify (security.md) — the screen never fabricates payment status.
  */
-
-// ── INTEGRATION-05 seam ──────────────────────────────────────────────────────
-
-/** `POST /store/payments/khqr/start` response shape (BACKEND-03). */
-interface KhqrSession {
-  qr: string
-  deeplink: string | null
-  reference: string
-  expires_at: string | null
-}
-
-/** `GET /store/payments/khqr/status` response shape (BACKEND-03B). */
-type KhqrStatus =
-  | { status: "pending" }
-  | { status: "paid"; order_id: string; invoice_token?: string }
-  | { status: "expired" }
-
-/** Placeholder QR window until the backend's real `expires_at` is wired. */
-const PLACEHOLDER_WINDOW_MINUTES = 3
-
-/**
- * Sample EMVCo KHQR payload so the screen renders a real, scannable symbol
- * before INTEGRATION-05 supplies the live one. Not a valid Bakong account — it
- * only exercises the renderer/countdown. INTEGRATION-05 replaces this with the
- * `/khqr/start` call (`src/lib/checkout.ts`).
- */
-function startKhqr(): Promise<KhqrSession> {
-  const expiresAt = new Date(
-    Date.now() + PLACEHOLDER_WINDOW_MINUTES * 60 * 1000
-  ).toISOString()
-  return Promise.resolve({
-    qr: "00020101021229180014alistore@aclb52045999530384054031.005802KH5909Ali Store6010Phnom Penh62150111ALISTORE-DEMO6304",
-    deeplink: null,
-    reference: "00000000000000000000000000000000",
-    expires_at: expiresAt,
-  })
-}
-
-/**
- * Placeholder status poll. Always "pending" in sandbox — the screen never
- * fabricates a "paid" (security.md: status is server-verified only).
- * INTEGRATION-05 replaces this with the `/khqr/status?reference=` call.
- */
-function pollKhqrStatus(_reference: string): Promise<KhqrStatus> {
-  return Promise.resolve({ status: "pending" })
-}
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import Image from "next/image"
+import Link from "next/link"
 
 /**
  * Catalog product tile (DESIGN.md product-card / FRONTEND-05).
@@ -19,6 +20,8 @@ import Image from "next/image"
 interface ProductCardProps {
   /** Style number / product reference shown as the mute caption-sm line. */
   productId: string
+  /** Product handle — the whole tile links to `/product/[handle]`. */
+  handle: string
   /** Product name (body-strong). */
   name: string
   /** Square product image URL. */
@@ -42,6 +45,7 @@ const PRICE_TYPE = "text-base font-medium leading-normal"
 
 export default function ProductCard({
   productId,
+  handle,
   name,
   imageSrc,
   imageAlt,
@@ -51,7 +55,7 @@ export default function ProductCard({
   const isOnSale = originalPrice !== undefined
 
   return (
-    <article className="flex flex-col">
+    <Link href={`/product/${handle}`} className="flex flex-col">
       <div className="relative aspect-square w-full bg-soft-cloud">
         <Image
           src={imageSrc}
@@ -79,6 +83,6 @@ export default function ProductCard({
           <span className={`${PRICE_TYPE} text-ink`}>{price}</span>
         )}
       </div>
-    </article>
+    </Link>
   )
 }
