@@ -22,8 +22,9 @@ import Link from "next/link"
  *   Deliverables don't include `tailwind.config.js` (same pattern as Hero's
  *   `leading-[0.9]`).
  *
- * Presentational Server Component — no client interactivity. The 600 / 1024
- * column breakpoints match the project's 1-up→2-up→4-up convention. Links use
+ * Presentational Server Component — no client interactivity. Columns are a
+ * 2-up grid on mobile (standard clothing-store mobile footer — avoids a tall
+ * 1-up stack) widening to 4-up at ≥1024. Links use
  * placeholder `/` hrefs (real Help/Delivery routes and the Telegram/Facebook
  * channel URLs are not wired yet), consistent with TopNav's placeholder nav.
  */
@@ -71,7 +72,7 @@ export default function Footer() {
   return (
     <footer className="border-t border-hairline bg-canvas text-mute">
       <div className="mx-auto max-w-8xl px-4 py-section min-[600px]:px-6">
-        <div className="grid grid-cols-1 gap-xl min-[600px]:grid-cols-2 min-[1024px]:grid-cols-4">
+        <div className="grid grid-cols-2 gap-xl min-[1024px]:grid-cols-4">
           {FOOTER_COLUMNS.map((column) => (
             <nav
               key={column.heading}
