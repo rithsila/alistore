@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { ShoppingBag } from "@medusajs/icons"
 
 import PillButton from "../ui/PillButton"
+import { useCartCount } from "@lib/hooks/use-cart-count"
 
 /**
  * Mobile cart/checkout bottom bar (DESIGN.md "persistent cart/checkout
@@ -23,19 +24,15 @@ import PillButton from "../ui/PillButton"
  * Sits in normal document flow with a single `border-t border-hairline`
  * separator (no `position: fixed`, no drop shadow — DESIGN.md / FRONTEND-21).
  *
- * Presentational and props-driven: the count is supplied by the caller. The
- * live cart count (cart create / line-item add/update/delete via the Medusa
- * SDK) is wired in INTEGRATION-02; this component re-renders whenever the
- * passed count changes.
+ * Subscribes to the live cart count via `useCartCount` (INTEGRATION-02) — the
+ * exact subscription TopNav's bag badge uses — so the count and the Checkout
+ * button's enabled state update without a navigation, and server pages can
+ * mount the bar without threading a count through.
  */
 
-interface BottomBarProps {
-  /** Number of items currently in the bag. */
-  itemCount: number
-}
-
-export default function BottomBar({ itemCount }: BottomBarProps) {
+export default function BottomBar() {
   const router = useRouter()
+  const itemCount = useCartCount()
 
   const isEmpty = itemCount <= 0
   const itemLabel = itemCount === 1 ? "item" : "items"

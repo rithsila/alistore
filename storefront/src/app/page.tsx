@@ -1,5 +1,6 @@
 import TopNav from "../components/layout/TopNav"
 import Hero from "../components/layout/Hero"
+import BottomBar from "../components/layout/BottomBar"
 import CategoryTabs from "../components/product/CategoryTabs"
 import ProductGrid from "../components/product/ProductGrid"
 import ProductCard from "../components/product/ProductCard"
@@ -10,7 +11,8 @@ import { getCatalogProducts, getCategories } from "@lib/medusa"
  *
  * Composes the storefront landing shell from the existing components:
  * `TopNav` (FRONTEND-04) → `Hero` (FRONTEND-08) → `CategoryTabs` (FRONTEND-07)
- * → `ProductGrid` of `ProductCard`s (FRONTEND-06 / FRONTEND-05).
+ * → `ProductGrid` of `ProductCard`s (FRONTEND-06 / FRONTEND-05)
+ * → `BottomBar` (FRONTEND-21, mobile-only cart/checkout bar).
  *
  * Server Component — it fetches the real catalog from the Medusa backend via the
  * server-side data layer (`@lib/medusa`) and passes serializable, display-ready
@@ -46,6 +48,10 @@ export default async function HomePage() {
           </ProductGrid>
         </section>
       </main>
+
+      {/* Mobile-only persistent cart/checkout bar (FRONTEND-21) — normal flow,
+          hidden ≥600px inside the component. */}
+      <BottomBar />
     </>
   )
 }
