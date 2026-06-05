@@ -31,9 +31,16 @@ const nextConfig = {
         hostname: "localhost",
       },
       {
+        // Production image CDN host (INTEGRATION-09): the R2 bucket served
+        // through Cloudflare CDN on img.<domain> (CLARIFY-08 = alistore.com;
+        // provisional until the domain purchase closes CLARIFY-08-REOPEN and
+        // SETUP-11 points DNS at R2).
+        protocol: "https",
+        hostname: "img.alistore.com",
+      },
+      {
         // Cloudflare R2 dev public host (SETUP-05). Product images load from
-        // this bucket in dev; production swaps to img.<domain> in SETUP-11 /
-        // INTEGRATION-09.
+        // this bucket in dev until SETUP-11 swaps to img.<domain> above.
         protocol: "https",
         hostname: "pub-1dedea628ee74e9399932493df26e28e.r2.dev",
       },

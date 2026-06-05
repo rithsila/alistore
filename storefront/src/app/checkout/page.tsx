@@ -10,6 +10,8 @@ import DeliveryForm, {
   isValidPhone,
   type DeliveryDetails,
 } from "../../components/checkout/DeliveryForm"
+import FacebookLogin from "../../components/checkout/FacebookLogin"
+import GoogleLogin from "../../components/checkout/GoogleLogin"
 import { placeCodOrder } from "@lib/checkout"
 
 /**
@@ -36,8 +38,15 @@ import { placeCodOrder } from "@lib/checkout"
  * COD submission is wired (INTEGRATION-04): the COD branch calls
  * `placeCodOrder` (`@lib/checkout`), which preps the cart + POSTs
  * `/store/orders/cod`, then routes to the COD confirmation
- * (`/order/[id]?status=cod`). The KHQR branch still routes to `/checkout/khqr`
- * for its start/poll wiring (INTEGRATION-05).
+ * (`/order/[id]?status=cod&token=…`, the order's invoice token carried through
+ * for the INTEGRATION-07 invoice link). The KHQR branch still routes to
+ * `/checkout/khqr` for its start/poll wiring (INTEGRATION-05).
+ *
+ * Social login is wired: `FacebookLogin` (INTEGRATION-06) and `GoogleLogin`
+ * (INTEGRATION-06B) are mounted side by side, and each one's `onPrefillName`
+ * drops the signed-in customer's name into the Full Name field on return from a
+ * completed OAuth round-trip. Both share the same session/prefill path — the
+ * session is read server-side by `@lib/auth` (`getSocialLoginPrefillName`).
  */
 
 // CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
@@ -142,6 +151,12 @@ export default function CheckoutPage() {
 
   const canPlaceOrder = isValidPhone(details.phone)
 
+  // INTEGRATION-06 / 06B: on return from a completed social login (Facebook or
+  // Google), prefill the name.
+  const handlePrefillName = (name: string) => {
+    setDetails((prev) => ({ ...prev, fullName: name }))
+  }
+
   const handlePlaceOrder = async () => {
     if (!canPlaceOrder || isPlacing) {
       return
@@ -159,7 +174,13 @@ export default function CheckoutPage() {
     setIsPlacing(true)
     const result = await placeCodOrder(details)
     if (result.ok) {
-      router.push(`/order/${result.orderId}?status=cod`)
+      // Carry the order's invoice token (INTEGRATION-07) so the confirmation
+      // page can build a working invoice link; the token is URL-safe (base64url).
+      const params = new URLSearchParams({ status: "cod" })
+      if (result.invoiceToken) {
+        params.set("token", result.invoiceToken)
+      }
+      router.push(`/order/${result.orderId}?${params.toString()}`)
       return
     }
     setError(result.error)
@@ -175,6 +196,13 @@ export default function CheckoutPage() {
 
         <div className="mt-section flex flex-col gap-section small:flex-row small:gap-xl">
           <div className="flex flex-col gap-section small:flex-1">
+            <div className="flex flex-col gap-3">
+              <p className="text-xs font-medium leading-normal text-mute">
+                Have an account? Sign in to fill your details faster.
+              </p>
+              <FacebookLogin onPrefillName={handlePrefillName} />
+              <GoogleLogin onPrefillName={handlePrefillName} />
+            </div>
             <DeliveryForm values={details} onChange={setDetails} />
             <PaymentChoice selected={payment} onSelect={setPayment} />
           </div>

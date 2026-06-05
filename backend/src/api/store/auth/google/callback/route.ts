@@ -21,7 +21,8 @@
  *     a fresh customer is created, or 409 on an email collision.
  *  4. Write one `customer_social_identity` row for new links.
  *  5. Establish a real session (`req.session.auth_context` → HttpOnly cookie) and
- *     return `{ customer }`.
+ *     302-redirect the browser back to `/checkout` (INTEGRATION-06B), where the
+ *     storefront reads this session and prefills the form.
  *
  * Any failure returns 401 `{ error, request_id }` (no internal detail leaked).
  *
@@ -61,6 +62,16 @@ const CALLBACK_PATH = "/store/auth/google/callback"
 
 /** Dev-only default callback (must match BACKEND-05C's start route). */
 const DEV_DEFAULT_REDIRECT_URI = `http://localhost:9000${CALLBACK_PATH}`
+
+/**
+ * Where to send the browser after a successful login (INTEGRATION-06B; mirrors
+ * the Facebook callback). Relative + hard-coded (security.md: redirect targets
+ * come from a hard-coded allowlist, never echoed client input — no
+ * `?next=`/`?return_to=`). Through the storefront's `/store/auth/*` proxy this
+ * resolves to `<storefront-origin>/checkout`, where `@lib/auth` reads this
+ * session and prefills the form.
+ */
+const STOREFRONT_RETURN_PATH = "/checkout"
 
 /** Redis key prefix BACKEND-05C stored the live `state` under. */
 function stateKey(state: string): string {
@@ -477,13 +488,9 @@ export async function GET(
     }
   }
 
-  // Return the customer (no tokens in the body — session lives in the cookie).
-  const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
-  const { data: customers } = await query.graph({
-    entity: "customer",
-    filters: { id: customerId },
-    fields: ["id", "email", "first_name", "last_name", "phone"],
-  })
-
-  res.json({ customer: customers?.[0] ?? { id: customerId } })
+  // Session established (HttpOnly connect.sid) — no tokens in the response.
+  // Return the browser to checkout (INTEGRATION-06B); the storefront reads this
+  // session and prefills the form. Relative + hard-coded redirect (security.md:
+  // no open redirect, no echoed return target).
+  res.redirect(302, STOREFRONT_RETURN_PATH)
 }

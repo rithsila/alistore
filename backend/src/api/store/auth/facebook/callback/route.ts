@@ -40,6 +40,16 @@ const STATE_COOKIE = "_fb_oauth_state"
 /** Path the state cookie was scoped to (must match BACKEND-05). */
 const CALLBACK_PATH = "/store/auth/facebook/callback"
 
+/**
+ * Where to send the browser after a successful login (INTEGRATION-06). Relative
+ * + hard-coded (security.md: redirect targets come from a hard-coded allowlist,
+ * never echoed client input — no `?next=`/`?return_to=`). Through the
+ * storefront's `/store/auth/*` rewrite this resolves to
+ * `<storefront-origin>/checkout`, where `@lib/auth` reads this session and
+ * prefills the form.
+ */
+const STOREFRONT_RETURN_PATH = "/checkout"
+
 /** Redis key prefix BACKEND-05 stored the live `state` under. */
 function stateKey(state: string): string {
   return `fb:oauth:state:${state}`
@@ -292,13 +302,9 @@ export async function GET(
     }
   }
 
-  // Return the customer (no tokens in the body — session lives in the cookie).
-  const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
-  const { data: customers } = await query.graph({
-    entity: "customer",
-    filters: { id: customerId },
-    fields: ["id", "email", "first_name", "last_name", "phone"],
-  })
-
-  res.json({ customer: customers?.[0] ?? { id: customerId } })
+  // Session established (HttpOnly connect.sid) — no tokens in the response.
+  // Return the browser to checkout (INTEGRATION-06); the storefront reads this
+  // session and prefills the form. Relative + hard-coded redirect (security.md:
+  // no open redirect, no echoed return target).
+  res.redirect(302, STOREFRONT_RETURN_PATH)
 }

@@ -2,10 +2,11 @@
 
 import { useEffect, useRef } from "react"
 
-import { retrieveCustomer } from "@lib/data/customer"
+import { getSocialLoginPrefillName } from "@lib/auth"
 
 /**
- * "Continue with Google" optional social sign-in (FRONTEND-17B).
+ * "Continue with Google" optional social sign-in (FRONTEND-17B; wired in
+ * INTEGRATION-06B).
  *
  * Direct mirror of `FacebookLogin` (FRONTEND-17) — same placement/pattern, only
  * the OAuth start endpoint differs.
@@ -13,29 +14,28 @@ import { retrieveCustomer } from "@lib/data/customer"
  * - Renders a "Continue with Google" pill linking to the backend OAuth start
  *   endpoint `/store/auth/google` (BACKEND-05C). The href is relative on
  *   purpose: the storefront has no public backend origin a client component can
- *   read (`MEDUSA_BACKEND_URL` is server-only), and a same-origin rewrite of
- *   `/store/*` to the Medusa backend — added at INTEGRATION — also keeps the
- *   `SameSite=Strict` session cookie usable. `loginHref` is overridable so that
- *   wiring can point it at an absolute URL if a rewrite isn't used.
+ *   read (`MEDUSA_BACKEND_URL` is server-only), and the same-origin rewrite of
+ *   `/store/auth/*` to the Medusa backend (`src/middleware.ts`, INTEGRATION-06)
+ *   keeps the OAuth `state` + session cookies on the storefront origin.
+ *   `loginHref` is overridable so wiring can point it elsewhere if needed.
  * - Prefills the name on return: after the OAuth round-trip the Google callback
- *   (BACKEND-05C) establishes the customer session and returns `{ customer }`
- *   (PRD §7, parallel to Facebook). On mount this component reads the current
- *   customer via the existing `retrieveCustomer()` data function and, if one is
- *   signed in, emits the display name through `onPrefillName` for the checkout
- *   page to drop into the Full Name field. Guests (no session) resolve to
- *   `null` and nothing is prefilled.
+ *   (BACKEND-05D) establishes the customer session and 302-redirects back to
+ *   `/checkout`. On mount this component reads the signed-in customer via the
+ *   shared `getSocialLoginPrefillName()` (`@lib/auth`) — which resolves the
+ *   session (`connect.sid` and/or JWT) server-side — and, if one exists, emits
+ *   the display name through `onPrefillName` for the checkout page to drop into
+ *   the Full Name field. Guests resolve to `null` and nothing is prefilled.
+ *
+ * INTEGRATION-06B reconciles BACKEND-05D's session cookie with the prefill read:
+ * the callback establishes a `connect.sid` session (no `_medusa_jwt`), so the
+ * starter's token-only `retrieveCustomer` would return nothing — this component
+ * reuses the session-aware `getSocialLoginPrefillName()` shared with Facebook
+ * (`@lib/auth`), per the "reuse, do not fork" requirement.
  *
  * Accent is NOT used: design.md reserves coral for the sale price and the
  * "Pay with KHQR" CTA only — a social-login button is neither, so this is an
  * ink outline pill. No third-party social-button library is introduced
  * (design.md); the project's own pill geometry is reused.
- *
- * Scope note: this task's only deliverable is this component. Mounting it inside
- * the checkout page and binding `onPrefillName` to the form state belongs to the
- * checkout page (FRONTEND-16 / INTEGRATION), which is out of this task's edit
- * surface. Reconciling BACKEND-05C's session cookie with the starter's
- * token-auth header (`retrieveCustomer` reads the latter) is likewise an
- * INTEGRATION concern; `retrieveCustomer` is the correct seam to build against.
  */
 
 const DEFAULT_LOGIN_HREF = "/store/auth/google"
@@ -64,18 +64,11 @@ export default function GoogleLogin({
   useEffect(() => {
     let active = true
 
-    // The OAuth round-trip is a full navigation, so the customer session (if
-    // any) is read once on mount. retrieveCustomer already swallows errors → null.
+    // The Google round-trip is a full navigation, so the customer session (if
+    // any) is read once on mount. getSocialLoginPrefillName swallows errors → null.
     void (async () => {
-      const customer = await retrieveCustomer()
-      if (!active || !customer) {
-        return
-      }
-      const name = [customer.first_name, customer.last_name]
-        .filter(Boolean)
-        .join(" ")
-        .trim()
-      if (name) {
+      const name = await getSocialLoginPrefillName()
+      if (active && name) {
         onPrefillNameRef.current?.(name)
       }
     })()

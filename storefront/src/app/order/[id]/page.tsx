@@ -52,11 +52,14 @@ interface OrderConfirmation {
   state: OrderPaymentState
   /**
    * Printable VAT-ready invoice URL (`GET /store/orders/:id/invoice`, BACKEND-06).
-   * That endpoint is order-token authed (security.md), so the live URL carries
-   * the token the COD / KHQR-status response returns. The token plumbing is an
-   * INTEGRATION concern; here it's a same-origin relative path (the storefront
-   * has no client-readable backend origin — see `FacebookLogin`), rendered only
-   * when present.
+   * That endpoint is order-token authed (security.md), so the URL carries the
+   * order's invoice token as `?token=` — handed to the buyer in the COD /
+   * KHQR-status response and routed here as a query param (INTEGRATION-07). It's
+   * a same-origin relative path (the storefront has no client-readable backend
+   * origin — see `FacebookLogin`); the storefront middleware proxies
+   * `/store/orders/:id/invoice` to the backend, injecting the publishable key
+   * the gate requires. `null` (and so no link) when no token was supplied, since
+   * a tokenless invoice request can only 403.
    */
   invoiceUrl: string | null
 }
@@ -68,16 +71,28 @@ interface OrderConfirmation {
  * BOTH variants now (`/order/<id>` → paid receipt; `/order/<id>?status=cod` →
  * COD follow-up). It never asserts "paid" from anything trustworthy — the real
  * implementation fetches the order and reads its server-verified payment status.
+ *
+ * INTEGRATION-07: the invoice link carries the order's invoice token, supplied
+ * here as the `token` query param (the COD redirect appends it from BACKEND-04's
+ * response; the KHQR path will do the same via INTEGRATION-05). The token is
+ * never minted or guessed client-side — only a token that already arrived on the
+ * URL is forwarded to the (token-gated) invoice route, which 403s a wrong one.
  */
 function fetchOrderConfirmation(
   id: string,
-  statusHint?: string
+  statusHint?: string,
+  token?: string
 ): Promise<OrderConfirmation> {
   const isCod = statusHint === "cod" || statusHint === "pending_confirmation"
+  const invoiceToken = token?.trim()
   return Promise.resolve({
     id,
     state: isCod ? "pending_confirmation" : "paid",
-    invoiceUrl: `/store/orders/${encodeURIComponent(id)}/invoice`,
+    invoiceUrl: invoiceToken
+      ? `/store/orders/${encodeURIComponent(
+          id
+        )}/invoice?token=${encodeURIComponent(invoiceToken)}`
+      : null,
   })
 }
 
@@ -103,7 +118,7 @@ const PILL_OUTLINE =
 
 interface OrderConfirmationPageProps {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ status?: string }>
+  searchParams: Promise<{ status?: string; token?: string }>
 }
 
 function InvoiceLink({ href }: { href: string }) {
@@ -123,8 +138,8 @@ export default async function OrderConfirmationPage({
   searchParams,
 }: OrderConfirmationPageProps) {
   const { id } = await params
-  const { status } = await searchParams
-  const order = await fetchOrderConfirmation(id, status)
+  const { status, token } = await searchParams
+  const order = await fetchOrderConfirmation(id, status, token)
 
   const isPaid = order.state === "paid"
 

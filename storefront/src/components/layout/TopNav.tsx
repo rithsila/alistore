@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   MagnifyingGlass,
@@ -11,6 +11,7 @@ import {
 } from "@medusajs/icons"
 import Chip from "../ui/Chip"
 import { useCartCount } from "@lib/hooks/use-cart-count"
+import type { Currency } from "@lib/price"
 
 /**
  * Responsive storefront header (DESIGN.md primary-nav / FRONTEND-04).
@@ -33,9 +34,34 @@ import { useCartCount } from "@lib/hooks/use-cart-count"
  * - Icon controls are plain icon buttons (the ui/ primitives — PillButton /
  *   SearchPill / Chip — don't cover icon-only affordances). The currency
  *   toggle reuses the Chip primitive.
+ * - The toggle persists its choice in the `ali_currency` preference cookie
+ *   (INTEGRATION-08) so it survives navigation and `startKhqr` (`@lib/checkout`)
+ *   can read it server-side to denominate the KHQR amount. A plain cookie on
+ *   purpose: a UI preference, not a credential (security.md's HttpOnly rule
+ *   covers tokens/session ids/payment refs — this is none of those).
  */
 
-type Currency = "USD" | "KHR"
+/** Display-currency preference cookie, read server-side by `@lib/checkout`. */
+const CURRENCY_COOKIE = "ali_currency"
+
+/** ~1 year — a long-lived display preference, not a session credential. */
+const CURRENCY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+/** Read the saved toggle choice; `null` when absent or not a known currency. */
+function readCurrencyCookie(): Currency | null {
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${CURRENCY_COOKIE}=`))
+  const value = entry?.slice(CURRENCY_COOKIE.length + 1)
+  return value === "USD" || value === "KHR" ? value : null
+}
+
+/** Persist the toggle choice for `startKhqr` (and future visits) to read. */
+function writeCurrencyCookie(code: Currency): void {
+  const secure = window.location.protocol === "https:" ? "; Secure" : ""
+  document.cookie = `${CURRENCY_COOKIE}=${code}; Path=/; Max-Age=${CURRENCY_COOKIE_MAX_AGE}; SameSite=Lax${secure}`
+}
 
 interface NavLink {
   label: string
@@ -115,6 +141,24 @@ export default function TopNav() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const itemCount = useCartCount()
 
+  // Restore the saved toggle choice after mount (INTEGRATION-08). The cookie
+  // can't be read during SSR/hydration — `document` doesn't exist server-side,
+  // and reading it in the initial state would mismatch the server markup — so
+  // the first paint shows the USD default and corrects itself immediately.
+  useEffect(() => {
+    const saved = readCurrencyCookie()
+    if (saved) {
+      setCurrency(saved)
+    }
+  }, [])
+
+  // Selecting a currency persists it so the choice survives navigation and
+  // `startKhqr` (server action) can denominate the KHQR amount with it.
+  const handleCurrencyChange = (next: Currency) => {
+    setCurrency(next)
+    writeCurrencyCookie(next)
+  }
+
   const closeDrawer = () => setIsDrawerOpen(false)
 
   return (
@@ -159,7 +203,7 @@ export default function TopNav() {
 
         {/* Desktop: currency toggle + search/user/bag */}
         <div className="hidden items-center gap-4 min-[600px]:flex">
-          <CurrencyToggle currency={currency} onChange={setCurrency} />
+          <CurrencyToggle currency={currency} onChange={handleCurrencyChange} />
           <button type="button" aria-label="Search" className={ICON_BUTTON}>
             <MagnifyingGlass className="h-6 w-6" />
           </button>
@@ -223,7 +267,10 @@ export default function TopNav() {
           </ul>
 
           <div className="mt-auto border-t border-hairline-soft px-4 py-xl">
-            <CurrencyToggle currency={currency} onChange={setCurrency} />
+            <CurrencyToggle
+              currency={currency}
+              onChange={handleCurrencyChange}
+            />
           </div>
         </div>
       </div>

@@ -6,8 +6,10 @@
  * Stack.md names `lib/checkout.ts` as the storefront's checkout helper. It holds
  * two slices: the COD slice (`placeCodOrder`, INTEGRATION-04) and the KHQR
  * submission/polling slice (`startKhqr` / `pollKhqrStatus`, INTEGRATION-05 — at
- * the bottom of this file). The currency pass-through (threading the nav toggle
- * into `/khqr/start`) is INTEGRATION-08 and extends this same file later.
+ * the bottom of this file). The currency pass-through (INTEGRATION-08) threads
+ * the nav toggle's selected currency — carried in the `ali_currency` preference
+ * cookie written by `TopNav` — into `/khqr/start`, so a KHR checkout gets a
+ * whole-riel QR.
  *
  * What it does: places a Cash-on-Delivery order against the session cart by
  * calling BACKEND-04 (`POST /store/orders/cod`), then hands the caller the new
@@ -49,9 +51,11 @@
  *    so the page can show a friendly message without leaking internals.
  */
 
+import { cookies } from "next/headers"
 import { sdk } from "@lib/config"
 import { HttpTypes } from "@medusajs/types"
 import { getAuthHeaders, getCartId, removeCartId } from "@lib/data/cookies"
+import type { Currency } from "@lib/price"
 
 /** Cambodian phone format (security.md) — the guest-checkout identifier. */
 const PHONE_PATTERN = /^(\+855|0)[1-9]\d{7,8}$/
@@ -84,7 +88,7 @@ export interface CheckoutContact {
 
 /** Result of a COD placement — a typed union so the page never sees a raw error. */
 export type PlaceCodOrderResult =
-  | { ok: true; orderId: string; status: string }
+  | { ok: true; orderId: string; status: string; invoiceToken?: string }
   | { ok: false; error: string }
 
 /** Validated, normalized contact (email always resolved to a usable value). */
@@ -250,7 +254,8 @@ function codErrorMessage(err: unknown): string {
  * Validates the contact, preps the cart (email + Cambodia shipping address +
  * first shipping option), then `POST`s BACKEND-04 (`/store/orders/cod`). On
  * success the (now completed) cart cookie is cleared so the next visit starts a
- * fresh cart, and the new `order_id` is returned for the COD-confirmation route.
+ * fresh cart, and the new `order_id` (plus the order's `invoice_token`) is
+ * returned for the COD-confirmation route.
  */
 export async function placeCodOrder(
   input: CheckoutContact
@@ -317,7 +322,15 @@ export async function placeCodOrder(
     // Order placed — the cart is completed; start fresh on the next visit.
     await removeCartId()
 
-    return { ok: true, orderId: result.order_id, status: result.status }
+    // `invoice_token` (BACKEND-04) is the per-order capability the confirmation
+    // page (INTEGRATION-07) appends to the invoice link so it opens for this
+    // order; pass it through so the COD redirect can carry it as `?token=`.
+    return {
+      ok: true,
+      orderId: result.order_id,
+      status: result.status,
+      invoiceToken: result.invoice_token,
+    }
   } catch (err) {
     return { ok: false, error: codErrorMessage(err) }
   }
@@ -352,12 +365,28 @@ export async function placeCodOrder(
  */
 
 /**
- * Store base currency for the KHQR amount. SETUP-04 locked USD as the store
- * default, so the cart is USD-denominated; threading the nav toggle's selected
- * currency into `/khqr/start` (so KHR checkouts get a whole-riel QR) is
- * INTEGRATION-08.
+ * Display-currency preference cookie (INTEGRATION-08), written by the nav
+ * currency toggle (`TopNav`, FRONTEND-04). A plain (non-HttpOnly) cookie on
+ * purpose: it carries a UI preference, not a credential, and the client owns
+ * it (security.md's HttpOnly rule covers tokens/session ids/payment refs —
+ * this is none of those).
  */
-const KHQR_CURRENCY = "USD" as const
+const CURRENCY_COOKIE = "ali_currency"
+
+/**
+ * Resolve the customer's selected currency for the KHQR amount (INTEGRATION-08).
+ *
+ * Reads the toggle's preference cookie server-side and validates it against the
+ * backend schema's enum — an absent or tampered value falls back to USD
+ * (SETUP-04 locked USD as the store default), so the cookie can only ever pick
+ * the other *supported* denomination. The amount itself is always computed
+ * server-side from the cart total (BACKEND-03: KHR derived via `USD_KHR_RATE`,
+ * rounded to whole riel) — the client never supplies an amount.
+ */
+async function getSelectedCurrency(): Promise<Currency> {
+  const value = (await cookies()).get(CURRENCY_COOKIE)?.value
+  return value === "KHR" ? "KHR" : "USD"
+}
 
 /** `md5(qr)` — 32 lowercase hex chars (matches the backend reference schema). */
 const REFERENCE_PATTERN = /^[a-f0-9]{32}$/
@@ -379,7 +408,8 @@ export type KhqrStatus =
 /**
  * Start a KHQR payment for the session cart (INTEGRATION-05).
  *
- * Reads the cart id from the `HttpOnly` cookie, calls BACKEND-03, and returns
+ * Reads the cart id from the `HttpOnly` cookie and the selected currency from
+ * the toggle's preference cookie (INTEGRATION-08), calls BACKEND-03, and returns
  * the QR session for the pay screen to render. Throws a customer-safe error on
  * any failure (missing cart, out-of-stock, gateway down) so the pay screen shows
  * its generic "couldn't start" state and offers a retry — the backend error
@@ -398,13 +428,17 @@ export async function startKhqr(): Promise<KhqrSession> {
     ...(await getAuthHeaders()),
   }
 
+  // INTEGRATION-08: the nav toggle's currency drives the QR's denomination —
+  // KHR checkouts get a whole-riel amount, converted server-side (BACKEND-03).
+  const currency = await getSelectedCurrency()
+
   let session: KhqrSession
   try {
     session = await sdk.client.fetch<KhqrSession>(
       "/store/payments/khqr/start",
       {
         method: "POST",
-        body: { cart_id: cartId, currency: KHQR_CURRENCY },
+        body: { cart_id: cartId, currency },
         headers,
         cache: "no-store",
       }
