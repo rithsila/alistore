@@ -643,8 +643,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `tests/khqr.spec.ts`
 - **Acceptance Criteria**: Full chain passes against sandbox.
 
-### TEST-05: Stock-in flow
+### ✅ TEST-05: Stock-in flow
 
+- **Completed 2026-06-06** — `storefront/tests/stock-in.spec.ts` (1 test), green solo and in the full parallel suite (17 passed / 1 skipped, the Telegram UAT fixme): admin stock-in of +7 on shorts L → level +7 observed three ways (endpoint response, independent `GET /admin/reports/stock`, DB read), exactly ONE `stock_movement(in)` row proven from the DB via the new read-only helper `backend/src/scripts/dev-verify-stock-in.ts` (unique per-run reason marker), and the PDP "N left" note rises by exactly +7; the level is restored afterwards with a compensating `out` movement (ledger keeps both rows) so the suite stays parallel-safe. Admin auth (user-approved): dev has no MFA (SETUP-01C deferred), so the spec creates a throwaway admin per run (`npx medusa user`, random hex creds, hard `[a-f0-9]` shell guards) and logs in via `POST /auth/user/emailpass` → Bearer JWT — reuse this pattern for TEST-06; each run leaves one inert `test-admin-<hex>@alistore.dev` row in the dev DB. This closes BACKEND-07's deferred authenticated "+N + one row" observation.
 - **Objective**: Verify receiving + availability.
 - **Requirements**: Admin stock-in → level rises, `in` movement recorded, storefront availability updates.
 - **Dependencies**: BACKEND-07, INTEGRATION-03
