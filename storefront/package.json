@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start -p 8000",
     "lint": "next lint",
+    "test": "playwright test",
     "analyze": "ANALYZE=true next build"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "@babel/core": "7.29.7",
     "@medusajs/types": "2.15.3",
     "@medusajs/ui-preset": "2.15.5",
+    "@playwright/test": "1.60.0",
     "@types/lodash": "4.17.24",
     "@types/node": "17.0.21",
     "@types/pg": "8.20.0",
