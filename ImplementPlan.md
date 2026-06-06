@@ -542,8 +542,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/lib/checkout.ts` (cod)
 - **Acceptance Criteria**: Submitting COD creates a `pending_confirmation` order and lands on the COD confirmation.
 
-### INTEGRATION-05: KHQR submission + polling
+### ✅ INTEGRATION-05: KHQR submission + polling
 
+- **Completed 2026-06-06** — `src/lib/checkout.ts` khqr slice: `startKhqr` (→ `POST /khqr/start`, cart id from HttpOnly cookie only, INTEGRATION-08 currency cookie threaded) and `pollKhqrStatus` (→ `GET /khqr/status`, server-reported status verbatim, clears the cart cookie on `paid`) drive the FRONTEND-18 pay screen (live QR + 3s poll → `router.push('/order/<id>')`). Completion-blocking gap found and fixed under TEST-04 (user-approved): the checkout page's KHQR branch never prepped the cart, so a verified payment could never complete — `prepareKhqrCheckout` now reuses the COD validation/prep (email + Cambodia address with phone + shipping method) before routing to `/checkout/khqr`. Acceptance observed live via TEST-04's full-chain spec: pay screen pending ("Waiting for payment…") → simulated sandbox payment via the mock-proxy seam → UI auto-redirects to the paid confirmation ("Payment confirmed"). Known LOW leftovers (recorded in TEST-04's note): the paid redirect drops `invoice_token` (no invoice link on the paid confirmation) and the optional note isn't persisted for KHQR orders.
 - **Objective**: Connect checkout to BACKEND-03/03B.
 - **Requirements**: KHQR path calls `/khqr/start`, renders pay screen, polls `/khqr/status`; on `paid` route to paid confirmation.
 - **Dependencies**: FRONTEND-18, BACKEND-03, BACKEND-03B, FRONTEND-19
@@ -607,16 +608,18 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 
 ## Phase 5 — TEST
 
-### TEST-01: Catalog & PDP render
+### ✅ TEST-01: Catalog & PDP render
 
+- **Completed 2026-06-06** — `storefront/tests/catalog.spec.ts` (8 tests) + `storefront/playwright.config.ts`; all pass against the live dev stack with `dev-seed-catalog-fixtures.ts` applied: grid 1/2/3/4-up at 360/768/1100/1440px, sale card struck mute original + accent coral sale price, sold-out XL chip struck & disabled, in-stock size selectable with stock note.
 - **Objective**: Verify browse + variant states.
 - **Requirements**: Check grid reflow, sale-price treatment, variant stock states.
 - **Dependencies**: INTEGRATION-03
 - **Deliverables**: `tests/catalog.spec.ts`
 - **Acceptance Criteria**: Grid columns change per breakpoint; struck sold-out size confirmed.
 
-### TEST-02: Cart math
+### ✅ TEST-02: Cart math
 
+- **Completed 2026-06-06** — `storefront/tests/cart.spec.ts` (4 tests), all passing against the live dev stack with the TEST-01 fixtures: subtotal for single ($15.00) and mixed full+sale lines ($22.00→$50.00→$57.00 via PDP adds + cart stepper), flat $1.50 delivery below threshold, "Free" at exactly $50.00 and above; KHR rounding asserted at the FRONTEND-22 formatter (whole riel, `៛`-prefixed, no decimals — no UI surface renders KHR strings; the KHQR EMV amount is TEST-04's scope).
 - **Objective**: Verify totals + delivery logic.
 - **Requirements**: Assert subtotal, delivery fee, free-over-threshold, KHR rounding.
 - **Dependencies**: INTEGRATION-02, FRONTEND-22
@@ -631,8 +634,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `tests/cod.spec.ts`
 - **Acceptance Criteria**: All three effects observed.
 
-### TEST-04: KHQR end-to-end (sandbox)
+### ✅ TEST-04: KHQR end-to-end (sandbox)
 
+- **Completed 2026-06-06** — `storefront/tests/khqr.spec.ts` (2 tests, serial), full chain green against the live dev stack: start contract (EMVCo QR, `reference = md5(qr)`, ~20-min expiry, status `pending` before pay) + the full UI chain (PDP → checkout → pay screen → simulated pay → "Payment confirmed" redirect → status `paid` + invoice 200 → DB evidence via `dev-verify-khqr-order.ts`: payment `captured_at` set, exactly one `stock_movement(out)` qty 1 `created_by=system`). "Simulate pay" = user-approved seam: the spec hosts a mock Bakong proxy on `127.0.0.1:4280` and `bakong-payment/lib/proxy.ts` gained a loopback-only SSRF escape dual-gated on `NODE_ENV≠production` + `BAKONG_PROXY_DEV_ALLOW_LOOPBACK=1` (dev `.env` block documented in `.env.template`; prod behavior unchanged), so the REAL verify → `authorizePayment` → `completeCartWorkflow` → stock-out path runs unmodified. Also fixed (user-approved, INTEGRATION-05 completion work): the KHQR checkout branch never prepped the cart (email/address/method), so a verified payment could never complete into an order — `prepareKhqrCheckout` (checkout.ts) now reuses the COD prep, and the shipping address carries the phone. Full suite after: 16 passed / 1 skipped (Telegram UAT fixme). Open findings: KHQR paid redirect drops `invoice_token` (no invoice link on paid confirmation — INTEGRATION-07 deferral); KHQR orders don't persist the optional note; `order.payment_status` is undefined via raw `query.graph` (BACKEND-08's paid-qualification leg — relevant to TEST-06); khqr endpoints 502 in dev while the mock env block is set but the mock isn't running.
 - **Objective**: Verify online payment path.
 - **Requirements**: start → simulate pay → status `paid` → order `paid` → one `stock_movement(out)`.
 - **Dependencies**: INTEGRATION-05

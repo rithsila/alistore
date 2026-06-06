@@ -181,6 +181,9 @@ async function prepareCartForCheckout(
         shipping_address: {
           first_name: firstName,
           last_name: lastName,
+          // The guest identifier (PRD): carried on the address so KHQR orders
+          // (which have no BACKEND-04 metadata contact) still record the phone.
+          phone: contact.phone,
           address_1: contact.address,
           country_code: COUNTRY_CODE,
         },
@@ -363,6 +366,63 @@ export async function placeCodOrder(
  *  - Errors return generic, customer-safe messages — the backend error envelope
  *    is never surfaced to the client.
  */
+
+/** Result of KHQR cart prep — same typed-union pattern as `PlaceCodOrderResult`. */
+export type PrepareKhqrCheckoutResult =
+  | { ok: true }
+  | { ok: false; error: string }
+
+/**
+ * Prep the session cart for a KHQR payment (INTEGRATION-05).
+ *
+ * The paid flip (BACKEND-03B) finalizes the order with `completeCartWorkflow`,
+ * which requires the cart to already carry an email, a shipping address, and a
+ * shipping method — the same prep `placeCodOrder` performs for COD. Without it
+ * a server-verified payment could never complete into an order, so the checkout
+ * page calls this with the delivery form's contact BEFORE routing to the pay
+ * screen (`/checkout/khqr`). Validation and prep reuse the COD helpers
+ * (`normalizeContact` + `prepareCartForCheckout`) — single source of truth.
+ *
+ * Returns a typed result (never throws) so the page shows the same
+ * customer-safe message treatment as the COD branch (security.md: internals are
+ * never leaked to the client).
+ */
+export async function prepareKhqrCheckout(
+  input: CheckoutContact
+): Promise<PrepareKhqrCheckoutResult> {
+  let contact: NormalizedContact
+  try {
+    contact = normalizeContact(input)
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Invalid delivery details.",
+    }
+  }
+
+  // Ownership: the cart id comes only from the HttpOnly cookie (security.md).
+  const cartId = await getCartId()
+  if (!cartId) {
+    return {
+      ok: false,
+      error: "Your cart could not be found. Please add your items again.",
+    }
+  }
+
+  try {
+    await prepareCartForCheckout(cartId, contact)
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof CheckoutPrepError
+          ? err.message
+          : "We couldn't prepare your order for delivery. Please try again.",
+    }
+  }
+
+  return { ok: true }
+}
 
 /**
  * Display-currency preference cookie (INTEGRATION-08), written by the nav

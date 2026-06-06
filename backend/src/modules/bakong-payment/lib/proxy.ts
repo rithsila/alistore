@@ -94,6 +94,40 @@ function isPrivateAddress(address: string): boolean {
 }
 
 /**
+ * Dev-only escape hatch (TEST-04): allow a plain-http LOOPBACK mock proxy so
+ * the KHQR paid flip can be simulated end-to-end against the dev stack
+ * (storefront/tests/khqr.spec.ts hosts the mock). Two explicit gates — the
+ * process must NOT be production AND `BAKONG_PROXY_DEV_ALLOW_LOOPBACK=1` must
+ * be set — and the relaxation applies to loopback targets only (127.0.0.0/8,
+ * `::1`, `localhost`). Every other SSRF rule (allowlist, all other private
+ * ranges, no credentials, no redirects) stays enforced. Inert in production:
+ * `NODE_ENV=production` disables it regardless of the flag.
+ */
+function devLoopbackEscapeActive(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.BAKONG_PROXY_DEV_ALLOW_LOOPBACK === "1"
+  )
+}
+
+/** Loopback hosts the dev escape may target (the ONLY relaxation it grants). */
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  if (host === "localhost") return true
+  const family = isIP(host)
+  if (family === 4) return host.startsWith("127.")
+  if (family === 6) return host === "::1"
+  return false
+}
+
+/** Loopback addresses (IPv4 127/8, `::1`, and the IPv4-mapped form). */
+function isLoopbackAddress(address: string): boolean {
+  if (isIP(address) === 4) return address.startsWith("127.")
+  const ip = address.toLowerCase()
+  return ip === "::1" || /^::ffff:127\./.test(ip)
+}
+
+/**
  * Validate the proxy URL shape (https, no creds, allowlisted host). Throws
  * `UnsafeProxyUrlError` on any violation. Does not perform DNS resolution.
  */
@@ -105,7 +139,11 @@ export function assertSafeProxyUrl(rawUrl: string, allowedHosts?: string[]): URL
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL is not a valid URL")
   }
 
-  if (url.protocol !== "https:") {
+  // Dev-only mock-proxy escape — see devLoopbackEscapeActive. Loopback targets
+  // may use plain http and skip the private-IP rejection; nothing else changes.
+  const devLoopback = devLoopbackEscapeActive() && isLoopbackHost(url.hostname)
+
+  if (url.protocol !== "https:" && !(devLoopback && url.protocol === "http:")) {
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must use https")
   }
   if (url.username || url.password) {
@@ -128,8 +166,9 @@ export function assertSafeProxyUrl(rawUrl: string, allowedHosts?: string[]): URL
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL host is not allowlisted")
   }
 
-  // A literal private IP in the URL is rejected outright.
-  if (isIP(host) && isPrivateAddress(host)) {
+  // A literal private IP in the URL is rejected outright (loopback excepted
+  // under the dev escape).
+  if (isIP(host) && isPrivateAddress(host) && !devLoopback) {
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must not target a private IP")
   }
 
@@ -144,6 +183,10 @@ async function assertResolvesPublic(hostname: string): Promise<void> {
   if (isIP(hostname)) {
     return // already validated as a non-private literal in assertSafeProxyUrl
   }
+  // Dev escape: only a loopback HOSTNAME (i.e. `localhost`) may resolve to a
+  // loopback address — a public-looking name resolving to 127.x stays rejected
+  // even in dev (rebinding defense intact).
+  const allowLoopback = devLoopbackEscapeActive() && isLoopbackHost(hostname)
   let records: { address: string }[]
   try {
     records = await lookup(hostname, { all: true })
@@ -154,6 +197,9 @@ async function assertResolvesPublic(hostname: string): Promise<void> {
     throw new UnsafeProxyUrlError("BAKONG_PROXY_URL host resolved to no address")
   }
   for (const { address } of records) {
+    if (allowLoopback && isLoopbackAddress(address)) {
+      continue
+    }
     if (isPrivateAddress(address)) {
       throw new UnsafeProxyUrlError(
         "BAKONG_PROXY_URL host resolves to a private address"

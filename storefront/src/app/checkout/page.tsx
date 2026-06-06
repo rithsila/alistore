@@ -12,7 +12,7 @@ import DeliveryForm, {
 } from "../../components/checkout/DeliveryForm"
 import FacebookLogin from "../../components/checkout/FacebookLogin"
 import GoogleLogin from "../../components/checkout/GoogleLogin"
-import { placeCodOrder } from "@lib/checkout"
+import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
 
 /**
  * Checkout page (FRONTEND-16) — route `/checkout`.
@@ -39,8 +39,10 @@ import { placeCodOrder } from "@lib/checkout"
  * `placeCodOrder` (`@lib/checkout`), which preps the cart + POSTs
  * `/store/orders/cod`, then routes to the COD confirmation
  * (`/order/[id]?status=cod&token=…`, the order's invoice token carried through
- * for the INTEGRATION-07 invoice link). The KHQR branch still routes to
- * `/checkout/khqr` for its start/poll wiring (INTEGRATION-05).
+ * for the INTEGRATION-07 invoice link). The KHQR branch (INTEGRATION-05) preps
+ * the cart with the same contact via `prepareKhqrCheckout` — completion on the
+ * paid flip requires the cart's email/address/shipping method — then routes to
+ * `/checkout/khqr` for the start/poll screen.
  *
  * Social login is wired: `FacebookLogin` (INTEGRATION-06) and `GoogleLogin`
  * (INTEGRATION-06B) are mounted side by side, and each one's `onPrefillName`
@@ -164,8 +166,18 @@ export default function CheckoutPage() {
     setError(null)
 
     if (payment === "khqr") {
-      // KHQR start/poll is wired in INTEGRATION-05; this routes to the pay screen.
-      router.push("/checkout/khqr")
+      // INTEGRATION-05: prep the cart (email + Cambodia address + shipping
+      // method) with the form's contact BEFORE the pay screen — the paid flip
+      // (BACKEND-03B) completes the cart into an order and requires all three
+      // (same prep as COD). On failure show the customer-safe message and stay.
+      setIsPlacing(true)
+      const prep = await prepareKhqrCheckout(details)
+      if (prep.ok) {
+        router.push("/checkout/khqr")
+        return
+      }
+      setError(prep.error)
+      setIsPlacing(false)
       return
     }
 
