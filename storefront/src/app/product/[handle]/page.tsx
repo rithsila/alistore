@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 
 import TopNav from "../../../components/layout/TopNav"
 import Gallery from "../../../components/product/Gallery"
@@ -32,7 +33,9 @@ import { emitCartChanged } from "@lib/cart-events"
  * the selected variant to the cart via the `@lib/cart` server action, then
  * announces the change so the nav bag count refreshes (`@lib/cart-events`). Real
  * per-variant **inventory** (struck/disabled sold-out) is INTEGRATION-03; the
- * "Pay with KHQR" CTA is wired in INTEGRATION-05.
+ * "Pay with KHQR" CTA is the express path: add to bag → `/checkout` (KHQR is
+ * the default payment selection there — delivery details are still required
+ * before the pay screen).
  */
 
 type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>
@@ -45,6 +48,7 @@ interface ProductPageProps {
 
 export default function ProductPage({ params }: ProductPageProps) {
   const { handle } = use(params)
+  const router = useRouter()
 
   // `undefined` = loading, `null` = not found, object = loaded.
   const [product, setProduct] = useState<ProductDetail | null | undefined>(
@@ -76,6 +80,26 @@ export default function ProductPage({ params }: ProductPageProps) {
       await addToCart({ variantId: selectedVariant.id, quantity: 1 })
       emitCartChanged()
       setAddStatus("added")
+    } catch {
+      setAddStatus("error")
+    }
+  }
+
+  /**
+   * "Pay with KHQR" express path: add the selected variant to the bag, then go
+   * straight to checkout (KHQR is the default payment selection there). It
+   * cannot jump to the pay screen directly — `/checkout/khqr` needs the
+   * delivery details the checkout form collects (prepareKhqrCheckout).
+   */
+  const handlePayWithKhqr = async (): Promise<void> => {
+    if (!selectedVariant || addStatus === "adding") {
+      return
+    }
+    setAddStatus("adding")
+    try {
+      await addToCart({ variantId: selectedVariant.id, quantity: 1 })
+      emitCartChanged()
+      router.push("/checkout")
     } catch {
       setAddStatus("error")
     }
@@ -122,10 +146,11 @@ export default function ProductPage({ params }: ProductPageProps) {
               />
 
               <BuyBox
-                price={product.price}
-                originalPrice={product.originalPrice}
+                amount={product.amount}
+                originalAmount={product.originalAmount}
                 hasSelectedVariant={selectedVariant !== null}
                 onAddToBag={handleAddToBag}
+                onPayWithKhqr={handlePayWithKhqr}
               />
 
               {addStatus === "added" ? (

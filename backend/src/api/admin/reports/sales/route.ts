@@ -55,16 +55,29 @@ const CANCELED_STATUS = "canceled"
 /** Medusa payment status for a fully captured (paid) order. */
 const CAPTURED_PAYMENT_STATUS = "captured"
 
-/** Order graph fields: identity/status, currency, total, and line items. */
+/**
+ * Order graph fields: identity/status, currency, total, and line items.
+ *
+ * Two query.graph gotchas here, both caught live by TEST-06 (the same class
+ * as the BACKEND-03 cart-total gotcha):
+ *  - `total` is computed from what's loaded — without `summary` (plus the
+ *    item price/quantity columns) it silently sums shipping only ($1.50 per
+ *    order instead of the real total).
+ *  - a line item's `quantity` lives on the `items.detail` pivot
+ *    (`order_item`); plain `items.quantity` never resolves through the
+ *    cross-module graph, which left `top_variants` empty.
+ */
 const ORDER_FIELDS = [
   "id",
   "status",
   "payment_status",
   "currency_code",
   "total",
+  "summary",
   "created_at",
   "items.variant_id",
-  "items.quantity",
+  "items.unit_price",
+  "items.detail.quantity",
   "items.product_title",
   "items.variant_title",
   "items.title",
@@ -115,6 +128,8 @@ type CacheModule = {
 interface OrderLineItem {
   variant_id?: string | null
   quantity?: number | null
+  /** The `order_item` pivot — where a line's quantity actually resolves. */
+  detail?: { quantity?: unknown } | null
   product_title?: string | null
   variant_title?: string | null
   title?: string | null
@@ -252,7 +267,9 @@ export async function GET(
 
       for (const item of order.items ?? []) {
         const variantId = item.variant_id
-        const quantity = Number(item.quantity) || 0
+        // Quantity resolves on the `detail` pivot (see ORDER_FIELDS note);
+        // the plain field is kept as a fallback should the graph gain it.
+        const quantity = toNumber(item.detail?.quantity ?? item.quantity) || 0
         if (!variantId || quantity <= 0) continue
         const existing = variantQuantities.get(variantId)
         if (existing) {

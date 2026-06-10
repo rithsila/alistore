@@ -36,7 +36,18 @@ const QuerySchema = z.object({ token: z.string().min(1).max(200) })
 /** Defense-in-depth per-IP limit (token brute-force is already infeasible). */
 const IP_RATE_LIMIT = { windowMs: 60_000, limit: 60, ttl: 60 } as const
 
-/** Order graph fields: identity, totals, line items, and the token metadata. */
+/**
+ * Order graph fields: identity, totals, line items, and the token metadata.
+ *
+ * Two query.graph gotchas here, both caught live by TEST-07 (the same class
+ * TEST-06 caught in the BACKEND-08 sales report):
+ *  - computed money fields (`item_total`, `items.total`) are derived from
+ *    what's loaded — without `summary` they silently resolve to 0, leaving
+ *    the invoice with $0.00 lines and a shipping-only total.
+ *  - a line item's `quantity` lives on the `items.detail` pivot
+ *    (`order_item`); plain `items.quantity` never resolves through the
+ *    cross-module graph, which rendered every quantity as 0.
+ */
 const ORDER_FIELDS = [
   "id",
   "display_id",
@@ -45,10 +56,12 @@ const ORDER_FIELDS = [
   "metadata",
   "item_total",
   "shipping_total",
+  "summary",
   "items.title",
   "items.product_title",
   "items.variant_title",
   "items.quantity",
+  "items.detail.quantity",
   "items.unit_price",
   "items.total",
 ]
@@ -194,7 +207,9 @@ export async function GET(
 
   const items: InvoiceLineItem[] = (order.items ?? []).map((item: any) => ({
     title: lineTitle(item),
-    quantity: Number(item.quantity) || 0,
+    // Quantity resolves on the `detail` pivot (see ORDER_FIELDS note); the
+    // plain field is kept as a fallback should the graph gain it.
+    quantity: toNumber(item.detail?.quantity ?? item.quantity) || 0,
     unitPrice: toNumber(item.unit_price),
     lineTotal: toNumber(item.total),
   }))

@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createServer, type IncomingMessage, type Server } from "node:http"
@@ -7,10 +6,14 @@ import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 
 /**
- * TEST-04 — KHQR end-to-end (sandbox).
+ * TEST-04 — Bakong KHQR backend contract (sandbox).
  *
- * Chain under test: start → simulate pay → status `paid` → order `paid` → one
- * `stock_movement(out)`.
+ * SCOPE CHANGE (PAYWAY-07, 2026-06-10): ABA PayWay replaced Bakong as the
+ * ACTIVE storefront KHQR provider (ImplementPlan Phase 6), so the full
+ * UI journey that used to live in this file now runs against PayWay in
+ * `payway.spec.ts`. This spec keeps the backend CONTRACT coverage for the
+ * dormant-but-registered Bakong provider (`/store/payments/khqr/*`), which
+ * stays in the codebase for a possible direct-Bakong future.
  *
  * ── How "simulate pay" works (user-approved seam, 2026-06-06) ────────────────
  * The backend's payment verification is server-side only (security.md): both
@@ -38,9 +41,8 @@ import { expect, test } from "@playwright/test"
  * Serial on purpose: the mock binds a fixed port and the tests share one
  * paid-references set, so they must run in a single worker, in order.
  *
- * Rate limits (security.md): `POST /khqr/start` allows 5/min/IP. A full run
- * makes 3 start calls (contract test + UI journey + idempotency probe), so
- * avoid more than one spec run per minute.
+ * Rate limits (security.md): `POST /khqr/start` allows 5/min/IP. This spec
+ * makes 1 start call; payway.spec.ts hits its own separate limiter keys.
  *
  * Variant choice: sweatpants size S — TEST-03 (cod.spec.ts) owns M and L for
  * its stock-count assertions, and the TEST-01 fixtures zero XL.
@@ -48,11 +50,9 @@ import { expect, test } from "@playwright/test"
 
 test.describe.configure({ mode: "serial" })
 
-const PDP_PATH = "/product/sweatpants"
 const KHQR_SIZE = "S"
 
 const BACKEND_URL = process.env.MEDUSA_BACKEND_URL ?? "http://localhost:9000"
-const BACKEND_DIR = join(__dirname, "..", "..", "backend")
 
 /** Must match BAKONG_PROXY_URL in backend/.env (dev-mock block). */
 const MOCK_PROXY_PORT = 4280
@@ -190,14 +190,6 @@ function publishableKeyHeaders(): Record<string, string> {
   }
 }
 
-/** Fresh valid Cambodian phone per call (`^0[1-9]\d{7,8}$`). */
-function randomPhone(): string {
-  const digits = Math.floor(Math.random() * 10_000_000)
-    .toString()
-    .padStart(7, "0")
-  return `09${digits}`
-}
-
 function md5Hex(value: string): string {
   return createHash("md5").update(value).digest("hex")
 }
@@ -313,183 +305,6 @@ test.describe("KHQR start contract (BACKEND-03)", () => {
   })
 })
 
-// ── 2. Full chain through the real storefront UI ─────────────────────────────
-
-test.describe("KHQR full chain (TEST-04)", () => {
-  test("simulated payment: status paid → order paid → one stock_movement(out)", async ({
-    page,
-  }) => {
-    // UI journey + cart completion + a `medusa exec` boot — generous budget.
-    test.setTimeout(420_000)
-
-    // ── Add to bag (PDP, size S).
-    await page.goto(PDP_PATH, { waitUntil: "domcontentloaded" })
-    const sizeGroup = page.getByRole("group", { name: "Size" })
-    await sizeGroup
-      .getByRole("button", { name: KHQR_SIZE, exact: true })
-      .click()
-    await page.getByRole("button", { name: "Add to bag" }).click()
-    await expect(page.getByText("Added to bag.")).toBeVisible()
-
-    // ── Checkout: delivery details + KHQR (the default selection).
-    await page.goto("/checkout", { waitUntil: "domcontentloaded" })
-    // Hydration gate (cod.spec.ts): pre-hydration input is lost to component
-    // state; the nav bag count only renders client-side, so it proves the tree
-    // is interactive.
-    await expect(page.getByRole("link", { name: "Bag, 1 item" })).toBeVisible()
-    await page.locator("#delivery-full-name").fill("Test Four Khqr")
-    await page.locator("#delivery-phone").fill(randomPhone())
-    await page.locator("#delivery-address").fill("St 04, Phnom Penh")
-    await page.getByText("Bakong KHQR", { exact: true }).click()
-    const placeOrder = page.getByRole("button", { name: "Place order" })
-    await expect(placeOrder).toBeEnabled()
-    // Preps the cart (email + address + shipping method) then routes to the
-    // pay screen (INTEGRATION-05).
-    await placeOrder.click()
-    await page.waitForURL(/\/checkout\/khqr/)
-
-    // ── Pay screen: live QR + polling state.
-    await expect(
-      page.getByRole("img", { name: "Bakong KHQR payment code" })
-    ).toBeVisible({ timeout: 30_000 })
-    await expect(
-      page.getByText("Waiting for payment… keep this screen open.")
-    ).toBeVisible()
-    await expect(page.getByText("Expires in")).toBeVisible()
-
-    // ── Recover the reference: read the cart id from the (HttpOnly) cookie and
-    // re-call /start — BACKEND-03 idempotently reuses the session the UI
-    // started, so this returns the SAME reference (the established proof trick).
-    const cartCookie = (await page.context().cookies()).find(
-      (c) => c.name === "_medusa_cart_id"
-    )
-    expect(cartCookie?.value, "no _medusa_cart_id cookie").toBeTruthy()
-    const cartId = decodeURIComponent(cartCookie!.value)
-
-    const headers = publishableKeyHeaders()
-    const startRes = await page.request.post(
-      `${BACKEND_URL}/store/payments/khqr/start`,
-      { headers, data: { cart_id: cartId, currency: "USD" } }
-    )
-    expect(startRes.status()).toBe(200)
-    const start = (await startRes.json()) as KhqrStartResponse
-    expect(start.reference).toMatch(REFERENCE_PATTERN)
-    expectSeamActive(start.deeplink)
-
-    // ── Before pay: server-verified status is pending.
-    const pendingRes = await page.request.get(
-      `${BACKEND_URL}/store/payments/khqr/status?reference=${start.reference}`,
-      { headers }
-    )
-    expect(pendingRes.status()).toBe(200)
-    expect(((await pendingRes.json()) as { status: string }).status).toBe(
-      "pending"
-    )
-
-    // ── SIMULATE PAY: the mock proxy now reports the md5 as a found
-    // transaction, exactly as Bakong would after the customer pays.
-    paidReferences.add(start.reference)
-
-    // ── The UI's own 3s poll picks it up; the backend verifies via the mock,
-    // completes the cart (provider re-verify → captured), and the screen
-    // redirects to the paid confirmation.
-    await page.waitForURL(/\/order\/[^/?]+$/, { timeout: 60_000 })
-    await expect(
-      page.getByRole("heading", { name: "Payment confirmed" })
-    ).toBeVisible()
-    const orderId = decodeURIComponent(
-      new URL(page.url()).pathname.split("/").pop()!
-    )
-    expect(orderId).toMatch(/^order_[A-Za-z0-9]+$/)
-
-    // ── status is now paid for that same reference (idempotent short-circuit)
-    // and hands out the order id + invoice token.
-    const paidRes = await page.request.get(
-      `${BACKEND_URL}/store/payments/khqr/status?reference=${start.reference}`,
-      { headers }
-    )
-    expect(paidRes.status()).toBe(200)
-    const paid = (await paidRes.json()) as {
-      status: string
-      order_id?: string
-      invoice_token?: string
-    }
-    expect(paid.status).toBe("paid")
-    expect(paid.order_id).toBe(orderId)
-    expect(paid.invoice_token).toBeTruthy()
-
-    // The token-gated invoice answers 200 → the order really exists
-    // server-side (wrong token → 403, missing order → 404; BACKEND-06).
-    const invoiceRes = await page.request.get(
-      `/store/orders/${encodeURIComponent(
-        orderId
-      )}/invoice?token=${encodeURIComponent(paid.invoice_token!)}`
-    )
-    expect(invoiceRes.status()).toBe(200)
-
-    // ── Backend truth: order `paid` + exactly one stock_movement(out).
-    // (No public API exposes these — the dev helper prints them from the DB.)
-    // execSync needs a shell for `npx` on Windows (spawning .cmd shell-less
-    // throws EINVAL on Node ≥20.12); injection is prevented by the hard
-    // character-class guard below — the interpolated value is [A-Za-z0-9_]
-    // only, no shell metacharacters possible.
-    if (!/^order_[A-Za-z0-9]+$/.test(orderId)) {
-      throw new Error("unsafe order id — refusing to shell out")
-    }
-    const verifyOut = execSync(
-      `npx medusa exec ./src/scripts/dev-verify-khqr-order.ts ${orderId}`,
-      {
-        cwd: BACKEND_DIR,
-        encoding: "utf8",
-        timeout: 240_000,
-        maxBuffer: 10 * 1024 * 1024,
-      }
-    )
-    const marker = verifyOut.match(/KHQR_VERIFY_RESULT (\{.*\})/)
-    expect(
-      marker,
-      "no KHQR_VERIFY_RESULT line in medusa exec output"
-    ).toBeTruthy()
-    const verified = JSON.parse(marker![1]) as {
-      order: {
-        id: string
-        status: string
-        payment_collections?: Array<{
-          status?: string | null
-          payments?: Array<{ id: string; captured_at?: string | null }>
-        }>
-      } | null
-      movements: Array<{
-        variant_id: string
-        type: string
-        quantity: number
-        reason: string | null
-        order_id: string | null
-        created_by: string | null
-      }>
-    }
-
-    // Order `paid`: the payment on the order's payment collection carries a
-    // `captured_at` stamp — written only when the payment is captured (the
-    // provider's authorizePayment returned "captured" after its own mock
-    // verify). The computed `payment_status` field is an HTTP-layer
-    // convenience and isn't resolvable from raw query.graph.
-    expect(verified.order?.id).toBe(orderId)
-    const payments = (verified.order?.payment_collections ?? []).flatMap(
-      (pc) => pc.payments ?? []
-    )
-    expect(payments.length).toBeGreaterThan(0)
-    for (const payment of payments) {
-      expect(payment.captured_at).toBeTruthy()
-    }
-
-    // One `out` ledger row for the single-line order, stamped by the system.
-    const outs = verified.movements.filter((m) => m.type === "out")
-    expect(outs).toHaveLength(1)
-    expect(outs[0].order_id).toBe(orderId)
-    expect(Number(outs[0].quantity)).toBe(1)
-    expect(outs[0].created_by).toBe("system")
-    expect(outs[0].reason).toBe("KHQR payment")
-    expect(outs[0].variant_id).toBeTruthy()
-  })
-})
+// The full storefront UI journey (formerly block 2 here) moved to
+// payway.spec.ts when ABA PayWay replaced Bakong as the active provider
+// (PAYWAY-06/07) — the pay screen now drives /store/payments/payway/*.

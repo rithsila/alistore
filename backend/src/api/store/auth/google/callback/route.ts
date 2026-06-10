@@ -26,6 +26,11 @@
  *
  * Any failure returns 401 `{ error, request_id }` (no internal detail leaked).
  *
+ * DEV SEAM (TEST-08B): the code-exchange POST resolves through `tokenUrl()`,
+ * which is `https://oauth2.googleapis.com/token` everywhere except under the
+ * dev-only, loopback-only `GOOGLE_TOKEN_DEV_BASE_URL` escape (see `devTokenUrl`
+ * below) used by `storefront/tests/google-login.spec.ts`.
+ *
  * SECURITY (security.md): scopes minimal (set in 05C); the code exchange targets
  * a hard-coded Google host (no user-controlled URL → no SSRF) and rejects
  * redirects; `id_token` is read straight from Google's token endpoint over TLS,
@@ -47,6 +52,54 @@ const GOOGLE_PROVIDER_ID = "google"
 
 /** Google's OAuth 2.0 token endpoint (hard-coded host — not user-controlled). */
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+/**
+ * Dev-only mock token-endpoint escape (TEST-08B — mirrors the TEST-08
+ * `FB_GRAPH_DEV_BASE_URL` seam in `auth-facebook/service.ts` and the Bakong
+ * `BAKONG_PROXY_DEV_ALLOW_LOOPBACK` seam): when the process is NOT production
+ * AND `GOOGLE_TOKEN_DEV_BASE_URL` targets a LOOPBACK host (localhost,
+ * 127.0.0.0/8, ::1), the code exchange POSTs to `<base>/token` instead of
+ * Google's token endpoint — so `storefront/tests/google-login.spec.ts` can mint
+ * the `id_token` and drive the full callback chain (state verify → exchange →
+ * claims verify → identity → session) without real Google credentials.
+ * Loopback-only by construction (a non-loopback value is ignored, so this can
+ * never redirect real traffic off-box) and inert in production:
+ * `NODE_ENV=production` disables it regardless of the value. The claims-only
+ * id_token verification (`verifyGoogleIdToken`) is unchanged — in dev the
+ * TLS-channel assumption is consciously replaced by the loopback boundary.
+ */
+function devTokenUrl(): string | null {
+  if (process.env.NODE_ENV === "production") return null
+  const raw = process.env.GOOGLE_TOKEN_DEV_BASE_URL?.trim()
+  if (!raw) return null
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null
+  if (url.username || url.password) return null
+
+  const host = url.hostname.toLowerCase()
+  // WHATWG URL keeps the brackets on IPv6 hostnames (`[::1]`); the bare `::1`
+  // form is kept as defense-in-depth should that normalization ever change.
+  const isLoopback =
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  if (!isLoopback) return null
+
+  return new URL("/token", url.origin).toString()
+}
+
+/** Token endpoint for the code exchange: the dev mock when active, else real. */
+function tokenUrl(): string {
+  return devTokenUrl() ?? GOOGLE_TOKEN_URL
+}
 
 /** Accepted `iss` values for a Google-issued id_token. */
 const GOOGLE_ISSUERS = new Set([
@@ -245,7 +298,7 @@ async function exchangeCodeForIdToken(
 
   let response: Response
   try {
-    response = await fetch(GOOGLE_TOKEN_URL, {
+    response = await fetch(tokenUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),

@@ -15,7 +15,8 @@ import {
   type CartLine,
 } from "@lib/cart"
 import { emitCartChanged } from "@lib/cart-events"
-import { formatUsd } from "@lib/price"
+import { formatPrice } from "@lib/price"
+import { useCurrency } from "@lib/currency-context"
 
 /**
  * Cart ("bag") page (FRONTEND-15; cart operations INTEGRATION-02) — route `/cart`.
@@ -36,9 +37,11 @@ import { formatUsd } from "@lib/price"
  * The stepper and remove controls render inline (DESIGN.md defines no cart
  * line-item or stepper component) — the same call made for the inline KHQR CTA.
  *
- * Currency: line amounts are USD major units from Medusa and rendered with the
- * shared `@lib/price` `formatUsd`. The full USD/KHR toggle (FRONTEND-22) drives
- * checkout in a later INTEGRATION task; this page renders the USD base.
+ * Currency: line amounts are USD major units from Medusa, rendered through the
+ * shared `@lib/price` `formatPrice` in the currency the nav toggle selected
+ * (`useCurrency`, FRONTEND-22) — so the whole bag switches between USD and KHR
+ * with the toggle. The free-delivery threshold logic stays in USD; only the
+ * displayed amounts are converted.
  *
  * Delivery fee constants are placeholders here; sourcing them from backend
  * settings (`DELIVERY_FEE` / `FREE_DELIVERY_THRESHOLD`, BACKEND-01) is wired with
@@ -66,21 +69,25 @@ interface UnitPriceProps {
 }
 
 function UnitPrice({ unitPrice, originalUnitPrice }: UnitPriceProps) {
+  const { currency } = useCurrency()
+
   if (originalUnitPrice !== undefined) {
     return (
       <div className="flex items-center gap-2">
         <span className={`${PRICE_TYPE} text-mute line-through`}>
-          {formatUsd(originalUnitPrice)}
+          {formatPrice(originalUnitPrice, currency)}
         </span>
         <span className={`${PRICE_TYPE} text-accent`}>
-          {formatUsd(unitPrice)}
+          {formatPrice(unitPrice, currency)}
         </span>
       </div>
     )
   }
 
   return (
-    <span className={`${PRICE_TYPE} text-ink`}>{formatUsd(unitPrice)}</span>
+    <span className={`${PRICE_TYPE} text-ink`}>
+      {formatPrice(unitPrice, currency)}
+    </span>
   )
 }
 
@@ -97,6 +104,8 @@ function CartLineRow({
   onChangeQuantity,
   onRemove,
 }: CartLineRowProps) {
+  const { currency } = useCurrency()
+
   return (
     <li className="flex gap-4 border-b border-hairline py-4">
       <div className="relative aspect-square w-20 shrink-0 bg-soft-cloud min-[600px]:w-24">
@@ -169,7 +178,7 @@ function CartLineRow({
           </div>
 
           <span className={`${PRICE_TYPE} text-ink`}>
-            {formatUsd(line.lineTotal)}
+            {formatPrice(line.lineTotal, currency)}
           </span>
         </div>
       </div>
@@ -179,6 +188,7 @@ function CartLineRow({
 
 export default function CartPage() {
   const router = useRouter()
+  const { currency } = useCurrency()
   // `undefined` = loading, `null`/empty = empty bag, object = loaded.
   const [cart, setCart] = useState<Cart | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -281,7 +291,7 @@ export default function CartPage() {
                   Subtotal
                 </span>
                 <span className={`${PRICE_TYPE} text-ink`}>
-                  {formatUsd(subtotal)}
+                  {formatPrice(subtotal, currency)}
                 </span>
               </div>
 
@@ -290,7 +300,9 @@ export default function CartPage() {
                   Delivery
                 </span>
                 <span className={`${PRICE_TYPE} text-ink`}>
-                  {deliveryFee === 0 ? "Free" : formatUsd(deliveryFee)}
+                  {deliveryFee === 0
+                    ? "Free"
+                    : formatPrice(deliveryFee, currency)}
                 </span>
               </div>
 
@@ -299,12 +311,13 @@ export default function CartPage() {
                   Total
                 </span>
                 <span className="text-2xl font-medium leading-normal text-ink">
-                  {formatUsd(total)}
+                  {formatPrice(total, currency)}
                 </span>
               </div>
 
               <p className="text-xs font-medium leading-normal text-mute">
-                Free delivery over $50
+                Free delivery over{" "}
+                {formatPrice(FREE_DELIVERY_THRESHOLD, currency)}
               </p>
 
               <PillButton

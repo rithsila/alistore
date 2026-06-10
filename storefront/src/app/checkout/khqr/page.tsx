@@ -49,7 +49,25 @@ type Phase = "loading" | "pending" | "expired" | "paid" | "error"
  *  classes; high contrast on white keeps the code reliably scannable. */
 const QR_INK = "#111111"
 const QR_CANVAS = "#ffffff"
-const QR_SIZE = 256
+const QR_SIZE = 240
+
+/**
+ * Official Bakong / NBC brand red — not a project design token (DESIGN.md).
+ * Used only on the KHQR card header to match the Bakong payment brand identity.
+ */
+const KHQR_RED = "#D0021B"
+
+/**
+ * Official KHQR center mark (downloaded from bsthen/bakong-khqr sdk/assets).
+ * Served from /public/images — excavate: true keeps surrounding modules intact.
+ */
+const KHQR_MARK_URI = "/images/khqr-mark.png"
+
+/**
+ * Optional merchant display name shown on the KHQR card.
+ * Set `NEXT_PUBLIC_KHQR_MERCHANT_NAME` in `.env` to the Bakong-registered name.
+ */
+const KHQR_MERCHANT_NAME = process.env.NEXT_PUBLIC_KHQR_MERCHANT_NAME ?? ""
 
 function formatCountdown(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
@@ -202,16 +220,60 @@ export default function KhqrPayPage() {
               Scan with any Cambodian banking app, or tap the button to pay.
             </p>
 
-            <div className="rounded-large border border-hairline bg-canvas p-6">
-              <QRCodeSVG
-                value={session.qr}
-                title="Bakong KHQR payment code"
-                size={QR_SIZE}
-                level="M"
-                marginSize={2}
-                bgColor={QR_CANVAS}
-                fgColor={QR_INK}
-              />
+            {/* ── KHQR branded card (matches official Bakong card design) ── */}
+            <div className="w-full overflow-hidden rounded-large border border-hairline bg-canvas">
+              {/* Red header — official KHQR logo, centred */}
+              <div
+                className="flex items-center justify-center px-4 py-3"
+                style={{ backgroundColor: KHQR_RED }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/images/khqr-logo.png"
+                  alt="KHQR"
+                  className="h-7 w-auto"
+                />
+              </div>
+
+              {/* Card body — centred */}
+              <div className="px-4 pt-3 text-center">
+                {/* Merchant name */}
+                {KHQR_MERCHANT_NAME && (
+                  <p className="text-sm font-medium text-ink">
+                    {KHQR_MERCHANT_NAME}
+                  </p>
+                )}
+
+                {/* Amount + currency */}
+                <p className="mt-1 text-lg font-medium text-ink">
+                  {session.amount.toFixed(2)}{" "}
+                  <span className="text-sm font-medium">
+                    {session.currency.toUpperCase()}
+                  </span>
+                </p>
+
+                {/* Dotted separator */}
+                <div className="mt-3 border-t border-dashed border-hairline" />
+
+                {/* QR code with official KHQR center mark */}
+                <div className="flex items-center justify-center py-4">
+                  <QRCodeSVG
+                    value={session.qr}
+                    title="KHQR payment code"
+                    size={QR_SIZE}
+                    level="M"
+                    marginSize={2}
+                    bgColor={QR_CANVAS}
+                    fgColor={QR_INK}
+                    imageSettings={{
+                      src: KHQR_MARK_URI,
+                      height: 44,
+                      width: 44,
+                      excavate: true,
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
             {remainingMs !== null && (

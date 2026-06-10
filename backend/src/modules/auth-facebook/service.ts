@@ -14,6 +14,11 @@
  * session-bound cookie) themselves — so `validateCallback` here does NOT re-check
  * provider state; the calling route is the CSRF authority.
  *
+ * DEV SEAM (TEST-08): the token-exchange + profile Graph calls resolve through
+ * `graphOrigin()`, which is `https://graph.facebook.com` everywhere except
+ * under the dev-only, loopback-only `FB_GRAPH_DEV_BASE_URL` escape (see
+ * `devGraphOrigin` below) used by `storefront/tests/fb-login.spec.ts`.
+ *
  * SECURITY (security.md): never log the `code`, access token, or profile (PII).
  * Scopes are restricted to `email,public_profile`.
  */
@@ -31,6 +36,54 @@ const FB_GRAPH_VERSION = "v21.0"
 
 /** Minimal scopes (security.md): email + public_profile only. */
 const FB_SCOPES = "email,public_profile"
+
+/** Production Graph API origin for the token-exchange + profile endpoints. */
+const FB_GRAPH_ORIGIN = "https://graph.facebook.com"
+
+/**
+ * Dev-only mock-Graph escape (TEST-08 — mirrors the Bakong
+ * `BAKONG_PROXY_DEV_ALLOW_LOOPBACK` seam in `bakong-payment/lib/proxy.ts`):
+ * when the process is NOT production AND `FB_GRAPH_DEV_BASE_URL` targets a
+ * LOOPBACK host (localhost, 127.0.0.0/8, ::1), the code-exchange + profile
+ * fetches resolve against that base instead of graph.facebook.com — so
+ * `storefront/tests/fb-login.spec.ts` can host a mock Graph API and drive the
+ * full callback chain (state verify → exchange → identity → session) without
+ * real Facebook credentials. Loopback-only by construction (a non-loopback
+ * value is ignored, so this can never redirect real traffic off-box) and inert
+ * in production: `NODE_ENV=production` disables it regardless of the value.
+ */
+function devGraphOrigin(): string | null {
+  if (process.env.NODE_ENV === "production") return null
+  const raw = process.env.FB_GRAPH_DEV_BASE_URL?.trim()
+  if (!raw) return null
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null
+  if (url.username || url.password) return null
+
+  const host = url.hostname.toLowerCase()
+  // WHATWG URL keeps the brackets on IPv6 hostnames (`[::1]`); the bare `::1`
+  // form is kept as defense-in-depth should that normalization ever change.
+  const isLoopback =
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  if (!isLoopback) return null
+
+  return url.origin
+}
+
+/** Graph origin for server-side calls: the dev mock when active, else real. */
+function graphOrigin(): string {
+  return devGraphOrigin() ?? FB_GRAPH_ORIGIN
+}
 
 interface Options {
   clientId: string
@@ -148,14 +201,17 @@ class FacebookAuthService extends AbstractAuthModuleProvider {
     try {
       // 1) Exchange the authorization code for a short-lived access token.
       const tokenUrl = new URL(
-        `https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`
+        `${graphOrigin()}/${FB_GRAPH_VERSION}/oauth/access_token`
       )
       tokenUrl.searchParams.set("client_id", this.config_.clientId)
       tokenUrl.searchParams.set("client_secret", this.config_.clientSecret)
       tokenUrl.searchParams.set("redirect_uri", this.config_.callbackUrl)
       tokenUrl.searchParams.set("code", code)
 
-      const tokenRes = await fetch(tokenUrl.toString(), { method: "GET" })
+      const tokenRes = await fetch(tokenUrl.toString(), {
+        method: "GET",
+        redirect: "manual", // never follow redirects (Bakong proxy posture)
+      })
       if (!tokenRes.ok) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
@@ -172,13 +228,17 @@ class FacebookAuthService extends AbstractAuthModuleProvider {
       }
 
       // 2) Fetch the profile (id is the stable identifier; email may be absent).
-      const meUrl = new URL(
-        `https://graph.facebook.com/${FB_GRAPH_VERSION}/me`
-      )
+      // The token rides the Authorization header (Graph API supports both) —
+      // never the URL, where it could leak into request logs (security.md:
+      // tokens are never logged).
+      const meUrl = new URL(`${graphOrigin()}/${FB_GRAPH_VERSION}/me`)
       meUrl.searchParams.set("fields", "id,name,email")
-      meUrl.searchParams.set("access_token", accessToken)
 
-      const meRes = await fetch(meUrl.toString(), { method: "GET" })
+      const meRes = await fetch(meUrl.toString(), {
+        method: "GET",
+        redirect: "manual", // never follow redirects (Bakong proxy posture)
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
       if (!meRes.ok) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,

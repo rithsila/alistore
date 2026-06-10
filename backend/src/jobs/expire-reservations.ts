@@ -33,6 +33,19 @@ import {
   deleteReservationsByLineItemsWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { BAKONG_PROVIDER_ID } from "../modules/bakong-payment"
+import { PAYWAY_PROVIDER_ID } from "../modules/aba-payway"
+import { KHPAY_PROVIDER_ID } from "../modules/khpay-payment"
+
+/**
+ * KHQR-style providers this job cleans up after (PAYWAY-05, KHPAY-04). All
+ * write `data.expires_at` aligned with the reservation TTL (20 min), so one
+ * expiry rule covers them.
+ */
+const KHQR_PROVIDER_IDS = new Set([
+  BAKONG_PROVIDER_ID,
+  PAYWAY_PROVIDER_ID,
+  KHPAY_PROVIDER_ID,
+])
 
 /**
  * Session statuses that mean "do not touch": paid (authorized/captured) or
@@ -68,17 +81,19 @@ interface CartView {
 }
 
 /**
- * Find a Bakong session on the cart whose QR window has passed and that is
- * still pending (not paid/terminal). Returns its id, or null when nothing on
- * the cart is eligible for release.
+ * Find a Bakong/PayWay session on the cart whose payment window has passed and
+ * that is still pending (not paid/terminal). Returns its id, or null when
+ * nothing on the cart is eligible for release.
  */
-function findExpiredPendingBakongSession(
+function findExpiredPendingKhqrSession(
   cart: CartView,
   nowMs: number
 ): string | null {
   const sessions = cart.payment_collection?.payment_sessions ?? []
   for (const session of sessions) {
-    if (session.provider_id !== BAKONG_PROVIDER_ID) continue
+    if (!session.provider_id || !KHQR_PROVIDER_IDS.has(session.provider_id)) {
+      continue
+    }
     if (session.status && SKIP_STATUSES.has(session.status)) continue
     if (!session.id) continue
 
@@ -119,7 +134,7 @@ export default async function expireReservationsJob(
       scanned += batch.length
 
       for (const cart of batch) {
-        const sessionId = findExpiredPendingBakongSession(cart, nowMs)
+        const sessionId = findExpiredPendingKhqrSession(cart, nowMs)
         if (!sessionId) continue
 
         const lineItemIds = (cart.items ?? [])
@@ -139,9 +154,9 @@ export default async function expireReservationsJob(
             })
         }
 
-        // 2. Delete the stale pending Bakong session (the order never existed;
-        // this is the "cancel" step). Leaves the payment collection intact so a
-        // returning customer can re-run /start.
+        // 2. Delete the stale pending Bakong/PayWay session (the order never
+        // existed; this is the "cancel" step). Leaves the payment collection
+        // intact so a returning customer can re-run /start.
         await deletePaymentSessionsWorkflow(container)
           .run({ input: { ids: [sessionId] } })
           .catch((err: unknown) => {

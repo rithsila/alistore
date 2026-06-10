@@ -187,6 +187,11 @@ async function prepareCartForCheckout(
           address_1: contact.address,
           country_code: COUNTRY_CODE,
         },
+        // The delivery note has no shipping-address home, so it rides on cart
+        // metadata — completeCartWorkflow copies it onto the order, where the
+        // Telegram alert reads it (the COD path's cod_contact still wins
+        // there; this covers KHQR orders, which never POST the note).
+        metadata: { checkout_note: contact.note ?? null },
       },
       {},
       headers
@@ -342,14 +347,18 @@ export async function placeCodOrder(
 // ── KHQR (INTEGRATION-05) ─────────────────────────────────────────────────────
 
 /**
- * KHQR start/poll layer — INTEGRATION-05.
+ * KHQR start/poll layer — INTEGRATION-05, cut over to KHPAY (KHPAY-05; was
+ * ABA PayWay under PAYWAY-06 — ABA declined the direct merchant application
+ * pending a business license).
  *
- * Connects the checkout to the Bakong KHQR endpoints (BACKEND-03 / BACKEND-03B):
- *  - `startKhqr` → `POST /store/payments/khqr/start` generates the dynamic QR +
- *    deeplink and reserves stock for the payment window;
- *  - `pollKhqrStatus` → `GET /store/payments/khqr/status?reference=` reports
+ * Connects the checkout to the KHPAY Bakong KHQR endpoints (KHPAY-02/03 —
+ * same contract the Bakong/PayWay routes had, so the pay screen is unchanged):
+ *  - `startKhqr` → `POST /store/payments/khpay/start` creates the KHPAY
+ *    Bakong QR (no banking-app deeplink on this rail — the deeplink CTA simply
+ *    doesn't render) and reserves stock for the payment window;
+ *  - `pollKhqrStatus` → `GET /store/payments/khpay/status?reference=` reports
  *    `pending | paid | expired`; on `paid` the backend has already verified the
- *    payment server-side and created the order.
+ *    payment server-side (KHPAY /bakong/check) and created the order.
  *
  * These two functions are the seam the KHQR pay screen (FRONTEND-18) drives —
  * they replace the screen's placeholder seam while keeping the same
@@ -448,18 +457,26 @@ async function getSelectedCurrency(): Promise<Currency> {
   return value === "KHR" ? "KHR" : "USD"
 }
 
-/** `md5(qr)` — 32 lowercase hex chars (matches the backend reference schema). */
-const REFERENCE_PATTERN = /^[a-f0-9]{32}$/
+/**
+ * KHPAY Bakong transaction id (`bk_…`) — matches the backend reference schema
+ * (KHPAY-03). Was 20 hex (PayWay tran_id, Phase 6) and 32 hex (Bakong md5)
+ * before that; KHPAY replaced PayWay as the active KHQR provider (Phase 7).
+ */
+const REFERENCE_PATTERN = /^bk_[A-Za-z0-9]{6,64}$/
 
-/** `POST /store/payments/khqr/start` response (BACKEND-03). */
+/** `POST /store/payments/khpay/start` response (KHPAY-02). */
 export interface KhqrSession {
   qr: string
   deeplink: string | null
   reference: string
   expires_at: string | null
+  /** Cart total in major units (e.g. 15 = $15.00 / 60000 = ៛60,000). Display only. */
+  amount: number
+  /** Selected currency code in lowercase — "usd" or "khr". */
+  currency: string
 }
 
-/** `GET /store/payments/khqr/status` response (BACKEND-03B). */
+/** `GET /store/payments/khpay/status` response (KHPAY-03). */
 export type KhqrStatus =
   | { status: "pending" }
   | { status: "paid"; order_id: string; invoice_token?: string }
@@ -495,7 +512,7 @@ export async function startKhqr(): Promise<KhqrSession> {
   let session: KhqrSession
   try {
     session = await sdk.client.fetch<KhqrSession>(
-      "/store/payments/khqr/start",
+      "/store/payments/khpay/start",
       {
         method: "POST",
         body: { cart_id: cartId, currency },
@@ -511,11 +528,25 @@ export async function startKhqr(): Promise<KhqrSession> {
     throw new Error("We couldn't start your payment. Please try again.")
   }
 
+  // Fetch cart total for KHQR card display (non-critical — QR encodes the real amount).
+  let cartTotal = 0
+  try {
+    const { cart: cartData } = await sdk.store.cart.retrieve(cartId, {
+      fields: "total",
+      headers,
+    })
+    cartTotal = (cartData?.total as number) ?? 0
+  } catch {
+    // Amount display degrades to 0.00; payment itself is unaffected.
+  }
+
   return {
     qr: session.qr,
     deeplink: session.deeplink ?? null,
     reference: session.reference,
     expires_at: session.expires_at ?? null,
+    amount: cartTotal,
+    currency,
   }
 }
 
@@ -544,12 +575,15 @@ export async function pollKhqrStatus(reference: string): Promise<KhqrStatus> {
 
   let result: KhqrStatus
   try {
-    result = await sdk.client.fetch<KhqrStatus>("/store/payments/khqr/status", {
-      method: "GET",
-      query: { reference },
-      headers,
-      cache: "no-store",
-    })
+    result = await sdk.client.fetch<KhqrStatus>(
+      "/store/payments/khpay/status",
+      {
+        method: "GET",
+        query: { reference },
+        headers,
+        cache: "no-store",
+      }
+    )
   } catch {
     // Transient/transport error — let the pay screen keep polling. Generic
     // message only; never surface the backend error envelope (security.md).

@@ -7,57 +7,50 @@ import Chip from "../ui/Chip"
 import PillButton from "../ui/PillButton"
 
 /**
- * Product filter sidebar / drawer (DESIGN.md filter-sidebar / FRONTEND-11).
+ * Product filter sidebar / drawer.
  *
- * Filters by category / size / color / price. Each group has a `heading-md`
- * header (16 / 500 / 1.75 → `text-base font-medium leading-7`) and its options
- * are `Chip`s (multi-select; active = ink fill). Groups are separated by 1px
- * hairline dividers with `spacing.lg` (18px) vertical rhythm.
+ * Desktop (≥1024px): fixed-width left rail.
+ * Mobile (≤1023px): hidden behind a "Filters" pill button that opens a
+ * full-screen off-canvas drawer.
  *
- * Responsive (DESIGN.md breakpoints — the config's `small` screen is 1024px,
- * matching the ≤1023 / ≥1024 boundary exactly):
- * - Desktop (≥1024px): a fixed-width left rail (`w-56` ≈ 220px; `w-56` keeps
- *   the width on the 8px grid, which the design rule requires over an exact
- *   arbitrary 220px).
- * - Mobile (≤1023px): the rail is hidden behind a "Filters" `PillButton` that
- *   opens a full-screen off-canvas drawer.
+ * Filter groups:
+ *   Special  — "New Arrivals" and "Discount" pill toggles
+ *   Category — checkbox-style rows
+ *   Size     — Chip pills
+ *   Colour   — circular colour-swatch dots
  *
- * Colors are filtered by name (reusing `Chip`), not swatch dots — swatch dots
- * belong to the PDP `VariantPicker` (FRONTEND-13) and are out of scope here.
- *
- * Selection lives in this client component; an optional `onChange` surfaces the
- * selected values per group so a parent (FRONTEND-10) can drive the filtered
- * grid.
+ * `onChange` fires with the full `FilterSelection` on every toggle so a parent
+ * (`CatalogClient`) can re-filter the product grid without a network round-trip.
  */
 
-interface FilterOption {
-  /** Stable filter value (e.g. category handle, size code). */
+export interface FilterOption {
   value: string
-  /** Display label. */
   label: string
 }
 
-type FilterGroupKey = "category" | "size" | "color" | "price"
+export type FilterGroupKey = "special" | "category" | "size" | "color"
 
-type FilterSelection = Record<FilterGroupKey, string[]>
+export type FilterSelection = Record<FilterGroupKey, string[]>
 
 interface FilterSidebarProps {
   categories?: FilterOption[]
   sizes?: FilterOption[]
   colors?: FilterOption[]
-  prices?: FilterOption[]
-  /** Notifies the parent when the selected filters change. */
   onChange?: (selected: FilterSelection) => void
+  initialSelection?: Partial<FilterSelection>
 }
 
-// Placeholder options (a parent can override via props).
+const SPECIAL_OPTIONS: readonly FilterOption[] = [
+  { value: "new-arrivals", label: "New Arrivals" },
+  { value: "discount", label: "Discount" },
+]
+
 const DEFAULT_CATEGORIES: readonly FilterOption[] = [
   { value: "t-shirt", label: "T-shirt" },
   { value: "polo", label: "Polo" },
   { value: "outerwear", label: "Outerwear" },
   { value: "hoodie", label: "Hoodie" },
   { value: "pants", label: "Pants" },
-  { value: "accessories", label: "Accessories" },
 ]
 
 const DEFAULT_SIZES: readonly FilterOption[] = [
@@ -71,96 +64,177 @@ const DEFAULT_SIZES: readonly FilterOption[] = [
 const DEFAULT_COLORS: readonly FilterOption[] = [
   { value: "black", label: "Black" },
   { value: "white", label: "White" },
-  { value: "gray", label: "Gray" },
-  { value: "navy", label: "Navy" },
   { value: "beige", label: "Beige" },
+  { value: "navy", label: "Navy" },
+  { value: "gray", label: "Gray" },
 ]
 
-const DEFAULT_PRICES: readonly FilterOption[] = [
-  { value: "under-25", label: "Under $25" },
-  { value: "25-50", label: "$25–$50" },
-  { value: "50-100", label: "$50–$100" },
-  { value: "100-plus", label: "$100+" },
-]
-
-// heading-md (DESIGN.md): 16px / 500 / 1.75.
-const HEADING_MD = "text-base font-medium leading-7 text-ink"
-
-const ICON_BUTTON =
-  "inline-flex h-11 w-11 items-center justify-center text-ink transition-opacity hover:opacity-70"
+const COLOR_HEX: Readonly<Record<string, string>> = {
+  black: "#111111",
+  white: "#f0f0f0",
+  grey: "#9ca3af",
+  gray: "#9ca3af",
+  navy: "#1f2a44",
+  blue: "#2563a8",
+  red: "#b91c1c",
+  green: "#15803d",
+  beige: "#e8dcc6",
+  brown: "#6b4f3a",
+}
+const FALLBACK_HEX = "#d4d4d4"
 
 const EMPTY_SELECTION: FilterSelection = {
+  special: [],
   category: [],
   size: [],
   color: [],
-  price: [],
 }
+
+const FILTER_HEADING = "text-base font-medium leading-7 text-ink"
+const GROUP_LABEL = "text-xs font-medium uppercase tracking-widest text-mute"
+const ICON_BUTTON =
+  "inline-flex h-11 w-11 items-center justify-center text-ink transition-opacity hover:opacity-70"
 
 export default function FilterSidebar({
   categories = [...DEFAULT_CATEGORIES],
   sizes = [...DEFAULT_SIZES],
   colors = [...DEFAULT_COLORS],
-  prices = [...DEFAULT_PRICES],
   onChange,
+  initialSelection,
 }: FilterSidebarProps) {
-  const [selected, setSelected] = useState<FilterSelection>(EMPTY_SELECTION)
+  const [selected, setSelected] = useState<FilterSelection>({
+    ...EMPTY_SELECTION,
+    ...initialSelection,
+  })
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
-  const groups: {
-    key: FilterGroupKey
-    label: string
-    options: FilterOption[]
-  }[] = [
-    { key: "category", label: "Category", options: categories },
-    { key: "size", label: "Size", options: sizes },
-    { key: "color", label: "Color", options: colors },
-    { key: "price", label: "Price", options: prices },
-  ]
-
   const toggle = (key: FilterGroupKey, value: string) => {
-    setSelected((prev) => {
-      const current = prev[key]
-      const nextValues = current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value]
-      const next = { ...prev, [key]: nextValues }
-      onChange?.(next)
-      return next
-    })
+    const current = selected[key]
+    const nextValues = current.includes(value)
+      ? current.filter((v) => v !== value)
+      : [...current, value]
+    const next = { ...selected, [key]: nextValues }
+    setSelected(next)
+    onChange?.(next)
   }
 
-  const renderGroups = () => (
-    <div className="divide-y divide-hairline">
-      {groups.map((group) => (
-        <fieldset key={group.key} className="py-lg first:pt-0 last:pb-0">
-          <legend className={HEADING_MD}>{group.label}</legend>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {group.options.map((option) => (
-              <Chip
-                key={option.value}
-                active={selected[group.key].includes(option.value)}
-                onClick={() => toggle(group.key, option.value)}
-              >
-                {option.label}
-              </Chip>
-            ))}
-          </div>
-        </fieldset>
+  const renderSpecial = () => (
+    <div className="flex flex-wrap gap-2">
+      {SPECIAL_OPTIONS.map((opt) => (
+        <Chip
+          key={opt.value}
+          active={selected.special.includes(opt.value)}
+          onClick={() => toggle("special", opt.value)}
+        >
+          {opt.label}
+        </Chip>
       ))}
+    </div>
+  )
+
+  const renderCategories = () => {
+    if (categories.length === 0) return null
+    return (
+      <div className="flex flex-col gap-3 border-t border-hairline pt-lg">
+        <span className={GROUP_LABEL}>Category</span>
+        <div className="flex flex-col gap-2">
+          {categories.map((opt) => {
+            const active = selected.category.includes(opt.value)
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="checkbox"
+                aria-checked={active}
+                onClick={() => toggle("category", opt.value)}
+                className="flex items-center gap-2 text-left"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-4 w-4 shrink-0 rounded-soft border transition-colors ${
+                    active ? "border-ink bg-ink" : "border-hairline bg-canvas"
+                  }`}
+                />
+                <span className="text-sm text-ink">{opt.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderSizes = () => {
+    if (sizes.length === 0) return null
+    return (
+      <div className="flex flex-col gap-3 border-t border-hairline pt-lg">
+        <span className={GROUP_LABEL}>Size</span>
+        <div className="flex flex-wrap gap-2">
+          {sizes.map((opt) => (
+            <Chip
+              key={opt.value}
+              active={selected.size.includes(opt.value)}
+              onClick={() => toggle("size", opt.value)}
+            >
+              {opt.label}
+            </Chip>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderColors = () => {
+    if (colors.length === 0) return null
+    return (
+      <div className="flex flex-col gap-3 border-t border-hairline pt-lg">
+        <span className={GROUP_LABEL}>Colour</span>
+        <div className="flex flex-wrap gap-3">
+          {colors.map((opt) => {
+            const hex = COLOR_HEX[opt.value.toLowerCase()] ?? FALLBACK_HEX
+            const active = selected.color.includes(opt.value)
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-label={opt.label}
+                aria-pressed={active}
+                onClick={() => toggle("color", opt.value)}
+                className={`h-6 w-6 rounded-circle border-2 transition-transform ${
+                  active
+                    ? "scale-110 border-ink"
+                    : "border-transparent hover:scale-105"
+                }`}
+                style={{ backgroundColor: hex }}
+              />
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderContent = () => (
+    <div className="flex flex-col gap-0">
+      {renderSpecial()}
+      {renderCategories()}
+      {renderSizes()}
+      {renderColors()}
     </div>
   )
 
   return (
     <>
-      {/* Desktop: fixed-width left rail (≥1024px). */}
+      {/* Desktop: fixed-width left rail (≥1024px) */}
       <aside
         aria-label="Product filters"
-        className="hidden w-56 shrink-0 bg-canvas small:block"
+        className="hidden w-56 shrink-0 small:block"
       >
-        {renderGroups()}
+        <h2 className={`${FILTER_HEADING} mb-lg`}>Filter</h2>
+        {renderContent()}
       </aside>
 
-      {/* Mobile: Filters button + full-screen off-canvas drawer (≤1023px). */}
+      {/* Mobile: Filters button (≤1023px) */}
       <div className="small:hidden">
         <PillButton
           onClick={() => setIsDrawerOpen(true)}
@@ -170,6 +244,7 @@ export default function FilterSidebar({
         </PillButton>
       </div>
 
+      {/* Mobile: off-canvas drawer */}
       <div
         aria-hidden={!isDrawerOpen}
         className={`fixed inset-0 z-50 flex flex-col bg-canvas transition-transform small:hidden ${
@@ -179,7 +254,7 @@ export default function FilterSidebar({
         }`}
       >
         <div className="flex h-14 items-center justify-between border-b border-hairline-soft px-4">
-          <span className={HEADING_MD}>Filters</span>
+          <span className={FILTER_HEADING}>Filter</span>
           <button
             type="button"
             aria-label="Close filters"
@@ -190,7 +265,7 @@ export default function FilterSidebar({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-lg">
-          {renderGroups()}
+          {renderContent()}
         </div>
       </div>
     </>

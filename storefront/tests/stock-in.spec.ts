@@ -150,13 +150,10 @@ test.describe("Stock-in flow (TEST-05)", () => {
       maxBuffer: 10 * 1024 * 1024,
     })
 
-    const loginRes = await request.post(
-      `${BACKEND_URL}/auth/user/emailpass`,
-      {
-        headers: { "content-type": "application/json" },
-        data: { email: adminEmail, password: adminPassword },
-      }
-    )
+    const loginRes = await request.post(`${BACKEND_URL}/auth/user/emailpass`, {
+      headers: { "content-type": "application/json" },
+      data: { email: adminEmail, password: adminPassword },
+    })
     expect(loginRes.status(), "emailpass login for the throwaway admin").toBe(
       200
     )
@@ -196,9 +193,7 @@ test.describe("Stock-in flow (TEST-05)", () => {
         variants: Array<{ id: string; title?: string | null }>
       }>
     }
-    const variant = products[0]?.variants.find(
-      (v) => v.title === STOCK_IN_SIZE
-    )
+    const variant = products[0]?.variants.find((v) => v.title === STOCK_IN_SIZE)
     expect(
       variant,
       `${PRODUCT_HANDLE} variant "${STOCK_IN_SIZE}" not found`

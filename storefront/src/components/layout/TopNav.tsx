@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import {
   MagnifyingGlass,
@@ -10,7 +10,9 @@ import {
   XMark,
 } from "@medusajs/icons"
 import Chip from "../ui/Chip"
+import CurrencyFlag from "../ui/CurrencyFlag"
 import { useCartCount } from "@lib/hooks/use-cart-count"
+import { useCurrency } from "@lib/currency-context"
 import type { Currency } from "@lib/price"
 
 /**
@@ -34,34 +36,14 @@ import type { Currency } from "@lib/price"
  * - Icon controls are plain icon buttons (the ui/ primitives — PillButton /
  *   SearchPill / Chip — don't cover icon-only affordances). The currency
  *   toggle reuses the Chip primitive.
- * - The toggle persists its choice in the `ali_currency` preference cookie
- *   (INTEGRATION-08) so it survives navigation and `startKhqr` (`@lib/checkout`)
- *   can read it server-side to denominate the KHQR amount. A plain cookie on
- *   purpose: a UI preference, not a credential (security.md's HttpOnly rule
- *   covers tokens/session ids/payment refs — this is none of those).
+ * - The toggle's choice is owned by `CurrencyProvider` (`@lib/currency-context`),
+ *   which both drives every price on the page (via `useCurrency`) and persists
+ *   the `ali_currency` preference cookie so the choice survives navigation and
+ *   `startKhqr` (`@lib/checkout`) can read it server-side to denominate the KHQR
+ *   amount (INTEGRATION-08).
+ * - Each currency renders as a flag-only chip (`CurrencyFlag`); the chip's
+ *   `aria-label` names the currency, so the flag itself is decorative.
  */
-
-/** Display-currency preference cookie, read server-side by `@lib/checkout`. */
-const CURRENCY_COOKIE = "ali_currency"
-
-/** ~1 year — a long-lived display preference, not a session credential. */
-const CURRENCY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
-
-/** Read the saved toggle choice; `null` when absent or not a known currency. */
-function readCurrencyCookie(): Currency | null {
-  const entry = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${CURRENCY_COOKIE}=`))
-  const value = entry?.slice(CURRENCY_COOKIE.length + 1)
-  return value === "USD" || value === "KHR" ? value : null
-}
-
-/** Persist the toggle choice for `startKhqr` (and future visits) to read. */
-function writeCurrencyCookie(code: Currency): void {
-  const secure = window.location.protocol === "https:" ? "; Secure" : ""
-  document.cookie = `${CURRENCY_COOKIE}=${code}; Path=/; Max-Age=${CURRENCY_COOKIE_MAX_AGE}; SameSite=Lax${secure}`
-}
 
 interface NavLink {
   label: string
@@ -98,7 +80,10 @@ function CurrencyToggle({
           aria-label={`Show prices in ${code}`}
           onClick={() => onChange(code)}
         >
-          {code}
+          <CurrencyFlag
+            currency={code}
+            className="h-3.5 w-auto rounded-sm border border-hairline"
+          />
         </Chip>
       ))}
     </div>
@@ -137,27 +122,11 @@ function BagLink({
 }
 
 export default function TopNav() {
-  const [currency, setCurrency] = useState<Currency>("USD")
+  // The display currency is owned by CurrencyProvider so the toggle and every
+  // price on the page share one source (and the choice persists via cookie).
+  const { currency, setCurrency } = useCurrency()
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const itemCount = useCartCount()
-
-  // Restore the saved toggle choice after mount (INTEGRATION-08). The cookie
-  // can't be read during SSR/hydration — `document` doesn't exist server-side,
-  // and reading it in the initial state would mismatch the server markup — so
-  // the first paint shows the USD default and corrects itself immediately.
-  useEffect(() => {
-    const saved = readCurrencyCookie()
-    if (saved) {
-      setCurrency(saved)
-    }
-  }, [])
-
-  // Selecting a currency persists it so the choice survives navigation and
-  // `startKhqr` (server action) can denominate the KHQR amount with it.
-  const handleCurrencyChange = (next: Currency) => {
-    setCurrency(next)
-    writeCurrencyCookie(next)
-  }
 
   const closeDrawer = () => setIsDrawerOpen(false)
 
@@ -203,7 +172,7 @@ export default function TopNav() {
 
         {/* Desktop: currency toggle + search/user/bag */}
         <div className="hidden items-center gap-4 min-[600px]:flex">
-          <CurrencyToggle currency={currency} onChange={handleCurrencyChange} />
+          <CurrencyToggle currency={currency} onChange={setCurrency} />
           <button type="button" aria-label="Search" className={ICON_BUTTON}>
             <MagnifyingGlass className="h-6 w-6" />
           </button>
@@ -267,10 +236,7 @@ export default function TopNav() {
           </ul>
 
           <div className="mt-auto border-t border-hairline-soft px-4 py-xl">
-            <CurrencyToggle
-              currency={currency}
-              onChange={handleCurrencyChange}
-            />
+            <CurrencyToggle currency={currency} onChange={setCurrency} />
           </div>
         </div>
       </div>

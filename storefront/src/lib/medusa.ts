@@ -20,11 +20,14 @@
  *
  * Pricing: the catalog is priced in USD (locked decision — KHR is derived from
  * `USD_KHR_RATE` at display time, see `@lib/price`). Medusa v2 returns
- * `calculated_price.calculated_amount` in **major units**, so amounts are
- * formatted directly with `formatUsd` — never divided by 100. A `region_id` is
- * required for Medusa to compute `calculated_price`; the flat storefront has no
- * country code in the URL, so the region is resolved once from `/store/regions`
- * (preferring `NEXT_PUBLIC_DEFAULT_REGION`, else the first region).
+ * `calculated_price.calculated_amount` in **major units**, so amounts are passed
+ * straight through as raw USD numbers — never divided by 100. The display
+ * currency (USD/KHR) is applied client-side at render time (`ui/Price` /
+ * `useCurrency`) so prices switch instantly with the nav toggle, rather than
+ * being baked into a USD string here. A `region_id` is required for Medusa to
+ * compute `calculated_price`; the flat storefront has no country code in the
+ * URL, so the region is resolved once from `/store/regions` (preferring
+ * `NEXT_PUBLIC_DEFAULT_REGION`, else the first region).
  *
  * Scope: product- and category-level catalog reads for Home / Category / PDP
  * (INTEGRATION-01). The PDP additionally binds **real per-variant inventory** to
@@ -33,11 +36,10 @@
  */
 
 import { sdk } from "@lib/config"
-import { formatUsd } from "@lib/price"
 import { HttpTypes } from "@medusajs/types"
 
 /** A catalog tile's display-ready data (maps 1:1 to `ProductCard` props). */
-interface CatalogProduct {
+export interface CatalogProduct {
   /** Product reference shown as the mute caption (first variant SKU, else handle). */
   productId: string
   /** Product handle — the card links to `/product/[handle]`. */
@@ -48,14 +50,22 @@ interface CatalogProduct {
   imageSrc: string
   /** Accessible alt text. */
   imageAlt: string
-  /** Display-ready current price, e.g. "$29.00". */
-  price: string
-  /** Display-ready original price — present only when the product is on sale. */
-  originalPrice?: string
+  /** Current price in USD major units (e.g. `29` = $29.00); formatted at render. */
+  amount: number
+  /** Original price in USD major units — present only when the product is on sale. */
+  originalAmount?: number
+  /** Unique size values extracted from all variants (e.g. ["S","M","L","XL"]). */
+  sizes: string[]
+  /** Unique colour names extracted from all variants (e.g. ["Black","White"]). */
+  colors: string[]
+  /** Category handles this product belongs to — used for client-side filtering. */
+  categoryHandles: string[]
+  /** True when the product carries the Medusa tag "new" (admin-controlled). */
+  isNew: boolean
 }
 
-/** A category chip's display-ready data (maps 1:1 to `CategoryTabs` props). */
-interface CatalogCategory {
+/** A category chip's display-ready data. */
+export interface CatalogCategory {
   handle: string
   name: string
 }
@@ -89,8 +99,10 @@ export interface ProductDetailVariant {
 interface ProductDetail {
   productId: string
   name: string
-  price: string
-  originalPrice?: string
+  /** Current price in USD major units (e.g. `29` = $29.00); formatted at render. */
+  amount: number
+  /** Original price in USD major units — present only when the product is on sale. */
+  originalAmount?: number
   /** Gallery images, in order (maps to `Gallery` props). */
   images: { src: string; alt: string }[]
   /** Selectable variants with real Medusa ids (maps to `VariantPicker`). */
@@ -100,28 +112,25 @@ interface ProductDetail {
 /**
  * Field selections. Only `+`/`*` prefixes are used so Medusa's default product
  * fields (title, handle, thumbnail, …) are preserved while these relations are
- * added: gallery images, variant SKUs, and the region-priced `calculated_price`.
+ * added. Variant options and categories are now included so the catalog grid
+ * can drive client-side size/color/category filters without a separate fetch.
  */
 const PRODUCT_FIELDS =
-  "+thumbnail,*images,+variants.sku,*variants.calculated_price"
+  "+thumbnail,*images,+variants.sku,*variants.calculated_price" +
+  ",*variants.options,*variants.options.option,*categories,*tags"
 
 /**
- * Richer selection for the PDP: the catalog fields plus each variant's title,
- * product-option values (Color / Size), and live inventory, needed to build the
- * variant picker with real variant ids and real stock (INTEGRATION-03).
- * `inventory_quantity` is Medusa's computed available count for the request's
- * sales channel; `manage_inventory`/`allow_backorder` flag variants that are
- * always purchasable. Kept separate so the lighter `PRODUCT_FIELDS` still drives
- * the catalog grids without fetching relations/inventory they don't render.
+ * Richer selection for the PDP: catalog fields plus variant title, live
+ * inventory, and backorder flags. Variant options are already in PRODUCT_FIELDS.
  */
 const PRODUCT_DETAIL_FIELDS =
   PRODUCT_FIELDS +
-  ",+variants.title,*variants.options,*variants.options.option" +
+  ",+variants.title" +
   ",+variants.inventory_quantity,+variants.manage_inventory" +
   ",+variants.allow_backorder"
 
-/** Default number of tiles for the home catalog grid. */
-const HOME_PRODUCT_LIMIT = 12
+/** Number of tiles for the home catalog grid — large enough for meaningful filtering. */
+const HOME_PRODUCT_LIMIT = 50
 
 /** Upper bound for a single category listing (no pagination in v1). */
 const CATEGORY_PRODUCT_LIMIT = 100
@@ -171,16 +180,17 @@ async function resolveRegionId(): Promise<string | null> {
 }
 
 /**
- * Extract the cheapest in-catalog price for a product.
+ * Extract the cheapest in-catalog price for a product, in USD major units.
  *
- * Returns the display-ready current price and, when the cheapest variant is
- * discounted (`calculated_amount < original_amount`), the struck original.
- * Returns `null` when no variant carries a calculated price (such a product
- * can't be shown "with a price", so callers skip it).
+ * Returns the current amount and, when the cheapest variant is discounted
+ * (`calculated_amount < original_amount`), the original amount (the struck
+ * price). Amounts are raw numbers — the display currency (USD/KHR) is applied at
+ * render time. Returns `null` when no variant carries a calculated price (such a
+ * product can't be shown "with a price", so callers skip it).
  */
 function extractPrice(
   product: HttpTypes.StoreProduct
-): { price: string; originalPrice?: string } | null {
+): { amount: number; originalAmount?: number } | null {
   const priced = (product.variants ?? []).filter(
     (variant) => variant.calculated_price?.calculated_amount != null
   )
@@ -201,10 +211,10 @@ function extractPrice(
   const original = calculated.original_amount as number | null | undefined
 
   if (original != null && original > amount) {
-    return { price: formatUsd(amount), originalPrice: formatUsd(original) }
+    return { amount, originalAmount: original }
   }
 
-  return { price: formatUsd(amount) }
+  return { amount }
 }
 
 /** Product reference for the card/PDP caption: first variant SKU, else handle. */
@@ -289,14 +299,33 @@ function toCatalogProduct(
     return null
   }
 
+  const variants = product.variants ?? []
+  const sizes = Array.from(
+    new Set(variants.map((v) => optionValue(v, /size/i)).filter(Boolean))
+  )
+  const colors = Array.from(
+    new Set(variants.map((v) => optionValue(v, /colou?r/i)).filter(Boolean))
+  )
+  const categoryHandles = (product.categories ?? [])
+    .map((c) => c.handle ?? "")
+    .filter(Boolean)
+
+  const isNew = (product.tags ?? []).some(
+    (t) => t.value?.toLowerCase() === "new"
+  )
+
   return {
     productId: referenceFor(product),
     handle: product.handle ?? "",
     name: product.title ?? "",
     imageSrc: product.thumbnail ?? product.images?.[0]?.url ?? BLANK_IMAGE,
     imageAlt: product.title ?? "",
-    price: priced.price,
-    originalPrice: priced.originalPrice,
+    amount: priced.amount,
+    originalAmount: priced.originalAmount,
+    sizes,
+    colors,
+    categoryHandles,
+    isNew,
   }
 }
 
@@ -437,8 +466,8 @@ export async function getProductDetail(
   return {
     productId: referenceFor(product),
     name: product.title ?? "",
-    price: priced.price,
-    originalPrice: priced.originalPrice,
+    amount: priced.amount,
+    originalAmount: priced.originalAmount,
     images,
     variants: (product.variants ?? []).map(toDetailVariant),
   }
