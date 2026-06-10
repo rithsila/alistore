@@ -33,6 +33,7 @@ import type { Logger } from "@medusajs/framework/types"
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
 import { BAKONG_PROVIDER_ID } from "../modules/bakong-payment"
 import { PAYWAY_PROVIDER_ID } from "../modules/aba-payway"
+import { KHPAY_PROVIDER_ID } from "../modules/khpay-payment"
 import { usdToKhr } from "../lib/settings"
 
 /** Medusa's built-in manual provider — the COD payment session (BACKEND-04). */
@@ -49,17 +50,31 @@ const SEND_TIMEOUT_MS = 10_000
 /** In-process send budget (security.md: Telegram send path — 30/min/process). */
 const SEND_BUDGET_PER_MINUTE = 30
 
-/** Order-graph fields needed to build the alert. */
+/**
+ * Order-graph fields needed to build the alert.
+ *
+ * Two query.graph gotchas (same class as BACKEND-08's, caught live by the
+ * first real KHPAY order):
+ *  - `total` is computed from what's loaded — without `summary` it silently
+ *    sums shipping only ($1.50 instead of the real total);
+ *  - a line item's `quantity` lives on the `items.detail` pivot
+ *    (`order_item`); plain `items.quantity` never resolves cross-module.
+ */
 const ORDER_FIELDS = [
   "id",
   "display_id",
   "currency_code",
   "total",
+  "item_total",
+  "shipping_total",
+  "summary",
   "metadata",
   "email",
   "items.title",
   "items.variant_title",
+  "items.unit_price",
   "items.quantity",
+  "items.detail.quantity",
   "shipping_address.first_name",
   "shipping_address.last_name",
   "shipping_address.phone",
@@ -93,6 +108,8 @@ type OrderItem = {
   title?: string | null
   variant_title?: string | null
   quantity?: number | null
+  /** The `order_item` pivot — the only place quantity reliably resolves. */
+  detail?: { quantity?: unknown } | null
 }
 
 type PlacedOrder = {
@@ -100,6 +117,8 @@ type PlacedOrder = {
   display_id?: number | null
   currency_code?: string | null
   total?: unknown
+  item_total?: unknown
+  shipping_total?: unknown
   metadata?: Record<string, unknown> | null
   items?: OrderItem[]
   shipping_address?: OrderAddress | null
@@ -148,6 +167,7 @@ function resolvePaymentMethod(order: PlacedOrder): string {
   const providers = (order.payment_collections ?? []).flatMap((pc) =>
     (pc.payments ?? []).map((p) => p.provider_id)
   )
+  if (providers.includes(KHPAY_PROVIDER_ID)) return "KHQR (KHPAY)"
   if (providers.includes(PAYWAY_PROVIDER_ID)) return "KHQR (ABA PayWay)"
   if (providers.includes(BAKONG_PROVIDER_ID)) return "KHQR"
   if (providers.includes(MANUAL_PAYMENT_PROVIDER_ID)) return "COD"
@@ -167,6 +187,13 @@ function formatAddress(addr?: OrderAddress | null): string {
     .map((p) => (p ?? "").toString().trim())
     .filter(Boolean)
     .join(", ")
+}
+
+/** "$X.XX USD" for a computed USD money field; null when it didn't resolve. */
+function formatUsd(value: unknown): string | null {
+  const n = toNumber(value)
+  if (!Number.isFinite(n)) return null
+  return `$${n.toFixed(2)} USD`
 }
 
 /** Format the order total as "$X.XX USD (≈ N KHR)" (KHR = whole riel). */
@@ -201,17 +228,30 @@ function buildMessage(order: PlacedOrder): string {
     "—"
   const phone = (cod.phone ?? addr?.phone ?? "").toString().trim() || "—"
   const address = (cod.address ?? "").toString().trim() || formatAddress(addr) || "—"
-  const note = (cod.note ?? "").toString().trim() || "—"
+  // KHQR orders have no cod_contact: their note rides on `checkout_note`
+  // (cart metadata written by the storefront prep, copied to the order by
+  // completeCartWorkflow — the same mechanism COD uses for cod_contact).
+  const note =
+    (cod.note ?? "").toString().trim() ||
+    (order.metadata?.["checkout_note"] ?? "").toString().trim() ||
+    "—"
 
   const items = (order.items ?? [])
     .map((item) => {
       const title = (item.title ?? "Item").toString().trim()
       const variant = (item.variant_title ?? "").toString().trim()
-      const qty = toNumber(item.quantity)
+      const qty = toNumber(item.detail?.quantity ?? item.quantity)
       const label = variant ? `${title} — ${variant}` : title
       return `• ${label} ×${Number.isFinite(qty) ? qty : "?"}`
     })
     .join("\n")
+
+  // Price breakdown (items vs delivery). Rendered only when the computed
+  // fields resolve and the order is USD (the shop base) — the Total line is
+  // always present either way.
+  const isUsd = (order.currency_code ?? "usd").toUpperCase() === "USD"
+  const subtotal = isUsd ? formatUsd(order.item_total) : null
+  const delivery = isUsd ? formatUsd(order.shipping_total) : null
 
   return [
     `🛍️ New order #${orderNo}`,
@@ -220,6 +260,8 @@ function buildMessage(order: PlacedOrder): string {
     "Items:",
     items || "• (no line items)",
     "",
+    ...(subtotal ? [`Subtotal: ${subtotal}`] : []),
+    ...(delivery ? [`Delivery: ${delivery}`] : []),
     `Total: ${formatTotal(order)}`,
     "",
     `Customer: ${name}`,

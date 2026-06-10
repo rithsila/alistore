@@ -34,13 +34,18 @@ import {
 } from "@medusajs/medusa/core-flows"
 import { BAKONG_PROVIDER_ID } from "../modules/bakong-payment"
 import { PAYWAY_PROVIDER_ID } from "../modules/aba-payway"
+import { KHPAY_PROVIDER_ID } from "../modules/khpay-payment"
 
 /**
- * KHQR-style providers this job cleans up after (PAYWAY-05). Both write
- * `data.expires_at` aligned with the reservation TTL (20 min), so one expiry
- * rule covers them.
+ * KHQR-style providers this job cleans up after (PAYWAY-05, KHPAY-04). All
+ * write `data.expires_at` aligned with the reservation TTL (20 min), so one
+ * expiry rule covers them.
  */
-const KHQR_PROVIDER_IDS = new Set([BAKONG_PROVIDER_ID, PAYWAY_PROVIDER_ID])
+const KHQR_PROVIDER_IDS = new Set([
+  BAKONG_PROVIDER_ID,
+  PAYWAY_PROVIDER_ID,
+  KHPAY_PROVIDER_ID,
+])
 
 /**
  * Session statuses that mean "do not touch": paid (authorized/captured) or

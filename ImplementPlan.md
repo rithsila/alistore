@@ -800,3 +800,61 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Dependencies**: PAYWAY-07, CLARIFY-12
 - **Deliverables**: env updates per environment; UAT sign-off notes in `docs/aba-payway-integration-guide.md`
 - **Acceptance Criteria**: Real sandbox payment flips a real order to paid end-to-end; production checklist complete.
+
+---
+
+## Phase 7 — KHPAY (aggregator replaces direct ABA PayWay as active KHQR provider)
+
+> **Why (locked 2026-06-10):** ABA declined the direct PayWay merchant application pending a business license (PAYWAY-08 blocked indefinitely). KHPAY (https://khpay.site) is a Cambodian aggregator exposing both an ABA PayWay QR rail and a **Bakong KHQR rail**. Locked decisions: (1) **Bakong rail only** — money settles directly to our own Bakong account (configured once in the KHPAY dashboard), not through KHPAY's PayWay link; (2) **in-store QR + polling** — the existing pay screen renders KHPAY's EMV KHQR string, customer never leaves the storefront; (3) **polling-only confirmation** — `paid` comes solely from backend `POST /bakong/check`, no webhook/callback_url. Both `bakong-payment` and `aba-payway` modules stay in the repo, dormant (env-gated). API auth is a bearer key (`KHPAY_API_KEY`); KHPAY's Bakong rail returns no banking-app deeplink (`deeplink: null` — the pay screen's deeplink CTA simply doesn't render). ⚠️ UAT must confirm: KHR-denominated generate (docs lean USD-only), real `bk_…` id shape vs `KHPAY_REFERENCE_PATTERN`, and the daily request quota (Free plan = 100 req/day — the 3s-cached status polling of ONE 20-min checkout can exceed it; budget a paid plan or longer verify cache before go-live).
+
+### ✅ KHPAY-01: KHPAY payment provider module (vendored client, Bakong rail)
+
+- _Completed 2026-06-10 — `backend/src/modules/khpay-payment/`: vendored `lib/client.ts` (`POST /bakong/generate` + `POST /bakong/check`, bearer auth, `{success,data}` envelope tolerant parse, `KHPAY_REFERENCE_PATTERN = /^bk_[A-Za-z0-9]{6,64}$/`, `TRANSACTION_NOT_FOUND` → notFound, SSRF-guarded transport via shared `proxy-guard.ts` with hard-coded allowlist `khpay.site`, no-redirect + 8s timeout, two-gate loopback escape `KHPAY_DEV_ALLOW_LOOPBACK=1`); `service.ts` (`static identifier = "khpay"` → `pp_khpay_khqr`): `initiatePayment` → generate with `type: "individual"` (locked Individual KHQR) + OUR ISO `expires_at` (KHPAY's is non-ISO/zone-ambiguous), `authorizePayment` → `captured` ONLY on live `/bakong/check` paid (never throws — stays pending), `refundPayment` NOT_ALLOWED, webhook entry inert (polling-only); `index.ts` exports `KHPAY_PROVIDER_ID`. Registration in `medusa-config.ts` conditional on `KHPAY_API_KEY` + boot-time `assertSafeKhpayUrl`; env scaffolding in `.env.example` (`KHPAY_BASE_URL`/`KHPAY_API_KEY`/`KHPAY_EXPIRES_MINUTES`/dev flag)._
+- **Objective**: Medusa payment provider that creates KHPAY Bakong KHQRs and verifies them server-side.
+- **Requirements**: Mirror `aba-payway` module structure; vendored client (no npm SDK); bearer-key auth, never logged; hard-coded SSRF allowlist `khpay.site` + boot check; `paid` only from `/bakong/check`; amount USD 2dp / KHR whole riel; payment lifetime pinned to the 20-min reservation TTL.
+- **Dependencies**: PAYWAY-01 (shared proxy-guard)
+- **Deliverables**: `backend/src/modules/khpay-payment/{index.ts,service.ts,lib/client.ts}`, `backend/medusa-config.ts` provider entry + boot check, `backend/.env.example` KHPAY block
+- **Acceptance Criteria**: Build green; with mock key set, provider registers and `initiatePayment` returns a QR via the local mock (:4285); `authorizePayment` returns `captured` only after the mock flips paid.
+
+### ✅ KHPAY-02: `POST /store/payments/khpay/start`
+
+- _Completed 2026-06-10 — Clone of payway start with the same response contract `{qr, deeplink: null, reference, expires_at}` (`reference` = KHPAY `bk_…` transaction_id; deeplink always null on this rail): zod middleware (`khpayStartMiddlewares` registered in `src/api/middlewares.ts`), 5/min/IP + 20/hr/cart limits, reservation planning with 409 out-of-stock, payment collection reuse, reserve-then-session with release-on-failure, `khpay:cart:<transaction_id>` cache map (TTL = window + 5 min), idempotent non-expired-session reuse, KHPAY failure → 502 `payment_gateway_unavailable`. Route helpers in `khpay/shared.ts` (per-provider copy, repo precedent)._
+- **Objective**: Start a KHPAY Bakong KHQR payment for a cart (same storefront contract as the khqr/payway start routes).
+- **Requirements**: Same as PAYWAY-03 with KHPAY provider/cache namespaces (`khpay:*`, `rl:khpay_*`).
+- **Dependencies**: KHPAY-01
+- **Deliverables**: `backend/src/api/store/payments/khpay/{start/route.ts,start/middlewares.ts,shared.ts}`, registration in `backend/src/api/middlewares.ts`
+- **Acceptance Criteria**: Against the local mock: returns EMV `qr` + `bk_` reference; double-submit reuses the session; out-of-stock returns 409.
+
+### ✅ KHPAY-03: `GET /store/payments/khpay/status?reference=`
+
+- _Completed 2026-06-10 — Same `{status: pending|paid|expired}` contract as the khqr/payway status routes: zod `reference` (`KHPAY_REFERENCE_PATTERN`), 60/min + 120/hr per reference + 60/min/IP, session-ownership check, idempotent `order_cart` short-circuit, expiry → release + `expired`, server verify via `verifyKhpayPaid` (≥3s cache `khpay:verify:*`; KHPAY `expired`/`failed` → terminal `expired` with reservation release; notFound stays pending until our window gate), on paid → shared `finalizePaidCart` (release hold → `completeCartWorkflow` with provider re-verify → idempotent `stock_movement(out)`, reason **"KHQR payment (KHPAY)"** → invoice token). Polling is the ONLY confirmation path (no webhook/pushback route exists for KHPAY)._
+- **Objective**: Poll endpoint that confirms payment and finalizes the order — the single confirmation entry point.
+- **Requirements**: Same as PAYWAY-03B minus pushback; verify via `POST /bakong/check`.
+- **Dependencies**: KHPAY-02
+- **Deliverables**: `backend/src/api/store/payments/khpay/status/route.ts`
+- **Acceptance Criteria**: Mock paid-flip drives `pending` → `paid`; order created with capture recorded; exactly one `out` movement per line item; client-forged "paid" impossible.
+
+### ✅ KHPAY-04: Lifecycle plumbing (reservation expiry + Telegram alert coverage)
+
+- _Completed 2026-06-10 — `expire-reservations.ts`: `KHQR_PROVIDER_IDS` now `{BAKONG, PAYWAY, KHPAY}` (KHPAY sessions write the same ISO `data.expires_at` pinned to the TTL, so the one expiry rule covers all three). `order-placed.ts`: `resolvePaymentMethod()` checks `KHPAY_PROVIDER_ID` first → **"KHQR (KHPAY)"** (COD metadata flag still wins; PayWay/Bakong branches unchanged)._
+- **Objective**: KHPAY sessions participate in the same lifecycle plumbing as Bakong/PayWay/COD.
+- **Dependencies**: KHPAY-01
+- **Deliverables**: edits to `backend/src/jobs/expire-reservations.ts`, `backend/src/subscribers/order-placed.ts`
+- **Acceptance Criteria**: An unpaid KHPAY cart's reservation is released after expiry by the job; a paid KHPAY order's Telegram alert resolves the method as KHQR (KHPAY).
+
+### ✅ KHPAY-05: Storefront cutover + end-to-end spec
+
+- _Completed 2026-06-10 — Cutover (`storefront/src/lib/checkout.ts`): `startKhqr`/`pollKhqrStatus` repointed to `/store/payments/khpay/start|status` (same response contract — pay screen untouched); `REFERENCE_PATTERN` → `/^bk_[A-Za-z0-9]{6,64}$/`; deeplink CTA self-hides (route always returns `deeplink: null`). Spec (`storefront/tests/khpay.spec.ts`): in-spec mock KHPAY gateway on **:4285** (4280 Bakong / 4281 FB / 4282 Google / 4284 PayWay taken) implementing `/bakong/generate` + `/bakong/check` with **strict bearer-key verification** (401 `INVALID_API_KEY` on mismatch). Journeys: (1) start contract — EMV QR + `bk_` reference + our-window expiry + null deeplink, strict-mock auth acceptance, status pending, idempotent reuse with no duplicate generate; (2) wrong-bearer rejection (mock strictness proof); (3) full UI chain — PDP size S → checkout "KHQR" → pay screen → simulated paid → UI poll redirect → order confirmed → status idempotent paid + invoice 200 → backend truth via `dev-verify-khqr-order.ts` (`captured_at` stamped, exactly one `stock_movement(out)`, reason "KHQR payment (KHPAY)"). backend/.env dev-mock block added (`KHPAY_BASE_URL=http://127.0.0.1:4285/api/v1` etc.; while set, /khpay/* 502s unless the mock listens)._
+- **Objective**: Point the existing KHQR checkout flow at the KHPAY routes (zero visual redesign) and prove the chain end-to-end against the strict local mock.
+- **Dependencies**: KHPAY-03, KHPAY-04
+- **Deliverables**: edits to `storefront/src/lib/checkout.ts`, `storefront/tests/khpay.spec.ts`, backend `.env` dev block
+- **Acceptance Criteria**: Full browser journey against the local mock: checkout → QR renders → mock pay → poll flips → confirmation page with order id + invoice link; COD path untouched; no regression in existing payment specs.
+
+### ✅ KHPAY-06: UAT cutover to real KHPAY (human + ops gated)
+
+- _Completed 2026-06-10 — **Real-money payment proven end-to-end**: owner's KHPAY key live (`GET /me` → `bakong_configured: true`, plan "basic"); real banking-app scan paid a $16.50 order (order #64, `order_01KTR2NWRMR6NXDK4N7PFFPS2Z`) → status flipped paid → confirmation page + Telegram alert. UAT findings folded back into code: (1) **KHR rejected live** ("currency must be USD") → start route now always charges USD, display toggle stays display-only; (2) live error envelope uses `error_code` not the documented `code` → client accepts both; (3) real txn ids are `bk_` + 16 UPPERCASE hex (pattern already matched); (4) PDP "Pay with KHQR" CTA had never been wired (FRONTEND-14 gap) → now adds to bag + routes to /checkout; (5) Telegram alert fixes (BACKEND-09): order query gained `summary`/`item_total`/`shipping_total`/`items.detail.quantity` (total had silently summed shipping-only $1.50; quantity showed ×?), note now rides cart `metadata.checkout_note` (written by checkout prep, copied to the order — covers KHQR orders that never POST a note), and the message gained Subtotal/Delivery breakdown lines. WATCH ITEMS (ops): plan quota headroom on "basic" (status polling at the 3s verify cache during checkouts — monitor dashboard usage), and fee/settlement terms still to be confirmed in writing with KHPAY._
+- **Objective**: Prove the integration against the real KHPAY gateway, then go live.
+- **Requirements**: Create a KHPAY account; configure Dashboard → Settings → Bakong (`account_id`, merchant name, city — settlement target is OUR Bakong account); mint a production API key (Dashboard → Settings → API keys; rotate via `POST /keys/{id}/rotate`); set `KHPAY_API_KEY` (+ leave `KHPAY_BASE_URL` at the default) per environment; **verify with a real ~$0.50 payment**: full storefront journey with a real banking-app scan → order flips paid → money lands in the Bakong account. Confirm during UAT: real `bk_…` id shape matches `KHPAY_REFERENCE_PATTERN`; whether `/bakong/generate` accepts KHR (if not, hide the KHR QR denomination or convert before send); plan quota headroom (Free = 100 req/day vs ~20 status verifies/min/checkout at the 3s cache — Starter+ strongly advised); KHPAY's fee/settlement terms and the vendor's operational trustworthiness (it is an aggregator holding our gateway access — document the risk owner).
+- **Dependencies**: KHPAY-05
+- **Deliverables**: env updates per environment; UAT sign-off notes in `docs/khpay-integration-guide.md`
+- **Acceptance Criteria**: Real payment flips a real order to paid end-to-end; quota/fee/KHR questions answered and recorded; production checklist complete.

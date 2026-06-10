@@ -305,7 +305,6 @@ test.describe("KHQR start contract (BACKEND-03)", () => {
   })
 })
 
-
 // The full storefront UI journey (formerly block 2 here) moved to
 // payway.spec.ts when ABA PayWay replaced Bakong as the active provider
 // (PAYWAY-06/07) — the pay screen now drives /store/payments/payway/*.
