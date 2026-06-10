@@ -54,3 +54,6 @@ medusa-db.sql
 
 # ABA PayWay sandbox credentials (real creds — never commit)
 sandbox/credential_info.txt
+
+# Playwright run artifacts
+test-results/
