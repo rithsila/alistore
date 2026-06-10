@@ -2,8 +2,7 @@
  * Responsive product grid (DESIGN.md PLP grid / FRONTEND-06).
  *
  * Reflows column count at the DESIGN.md breakpoints:
- *   - 1-up  at  ≤599px   (mobile, base)
- *   - 2-up  at  ≥600px   (mobile-landscape / small tablet)
+ *   - 2-up  at  base     (mobile, always 2 columns)
  *   - 3-up  at  ≥1024px  (desktop)
  *   - 4-up  at  ≥1440px  (desktop-large)
  *
@@ -28,7 +27,7 @@ interface ProductGridProps {
 
 export default function ProductGrid({ children }: ProductGridProps) {
   return (
-    <div className="grid grid-cols-1 gap-2 min-[600px]:grid-cols-2 min-[1024px]:grid-cols-3 min-[1440px]:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 min-[1024px]:grid-cols-3 min-[1440px]:grid-cols-4">
       {children}
     </div>
   )

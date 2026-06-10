@@ -1,7 +1,5 @@
 import TopNav from "../../../components/layout/TopNav"
-import FilterSidebar from "../../../components/product/FilterSidebar"
-import ProductGrid from "../../../components/product/ProductGrid"
-import ProductCard from "../../../components/product/ProductCard"
+import CatalogClient from "../../../components/product/CatalogClient"
 import { getCategoryProducts } from "@lib/medusa"
 
 /**
@@ -46,16 +44,12 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
           {categoryName}
         </h1>
 
-        <div className="mt-section flex flex-col gap-section small:flex-row small:gap-xl">
-          <FilterSidebar />
-
-          <div className="flex-1">
-            <ProductGrid>
-              {products.map((product) => (
-                <ProductCard key={product.productId} {...product} />
-              ))}
-            </ProductGrid>
-          </div>
+        <div className="mt-section">
+          <CatalogClient
+            products={products}
+            categories={[]}
+            activeCategory={handle}
+          />
         </div>
       </main>
     </>

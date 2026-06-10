@@ -1,18 +1,15 @@
 import TopNav from "../components/layout/TopNav"
 import Hero from "../components/layout/Hero"
 import BottomBar from "../components/layout/BottomBar"
-import CategoryTabs from "../components/product/CategoryTabs"
-import ProductGrid from "../components/product/ProductGrid"
-import ProductCard from "../components/product/ProductCard"
+import CatalogClient from "../components/product/CatalogClient"
 import { getCatalogProducts, getCategories } from "@lib/medusa"
 
 /**
  * Catalog / home landing page (FRONTEND-09, data-wired in INTEGRATION-01).
  *
- * Composes the storefront landing shell from the existing components:
- * `TopNav` (FRONTEND-04) → `Hero` (FRONTEND-08) → `CategoryTabs` (FRONTEND-07)
- * → `ProductGrid` of `ProductCard`s (FRONTEND-06 / FRONTEND-05)
- * → `BottomBar` (FRONTEND-21, mobile-only cart/checkout bar).
+ * Composes the storefront landing shell:
+ * `TopNav` → `Hero` → `CatalogClient` (filter sidebar + product grid)
+ * → `BottomBar` (mobile-only cart/checkout bar).
  *
  * Server Component — it fetches the real catalog from the Medusa backend via the
  * server-side data layer (`@lib/medusa`) and passes serializable, display-ready
@@ -38,14 +35,8 @@ export default async function HomePage() {
       <main>
         <Hero />
 
-        <section className="mx-auto flex max-w-8xl flex-col gap-xl px-4 py-section min-[600px]:px-6">
-          <CategoryTabs categories={categories} />
-
-          <ProductGrid>
-            {products.map((product) => (
-              <ProductCard key={product.productId} {...product} />
-            ))}
-          </ProductGrid>
+        <section className="mx-auto max-w-8xl px-4 py-section min-[600px]:px-6">
+          <CatalogClient products={products} categories={categories} />
         </section>
       </main>
 

@@ -470,6 +470,10 @@ export interface KhqrSession {
   deeplink: string | null
   reference: string
   expires_at: string | null
+  /** Cart total in major units (e.g. 15 = $15.00 / 60000 = ៛60,000). Display only. */
+  amount: number
+  /** Selected currency code in lowercase — "usd" or "khr". */
+  currency: string
 }
 
 /** `GET /store/payments/khpay/status` response (KHPAY-03). */
@@ -524,11 +528,25 @@ export async function startKhqr(): Promise<KhqrSession> {
     throw new Error("We couldn't start your payment. Please try again.")
   }
 
+  // Fetch cart total for KHQR card display (non-critical — QR encodes the real amount).
+  let cartTotal = 0
+  try {
+    const { cart: cartData } = await sdk.store.cart.retrieve(cartId, {
+      fields: "total",
+      headers,
+    })
+    cartTotal = (cartData?.total as number) ?? 0
+  } catch {
+    // Amount display degrades to 0.00; payment itself is unaffected.
+  }
+
   return {
     qr: session.qr,
     deeplink: session.deeplink ?? null,
     reference: session.reference,
     expires_at: session.expires_at ?? null,
+    amount: cartTotal,
+    currency,
   }
 }
 

@@ -316,7 +316,8 @@ export default function CartPage() {
               </div>
 
               <p className="text-xs font-medium leading-normal text-mute">
-                Free delivery over {formatPrice(FREE_DELIVERY_THRESHOLD, currency)}
+                Free delivery over{" "}
+                {formatPrice(FREE_DELIVERY_THRESHOLD, currency)}
               </p>
 
               <PillButton

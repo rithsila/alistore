@@ -39,7 +39,7 @@ import { sdk } from "@lib/config"
 import { HttpTypes } from "@medusajs/types"
 
 /** A catalog tile's display-ready data (maps 1:1 to `ProductCard` props). */
-interface CatalogProduct {
+export interface CatalogProduct {
   /** Product reference shown as the mute caption (first variant SKU, else handle). */
   productId: string
   /** Product handle — the card links to `/product/[handle]`. */
@@ -54,10 +54,18 @@ interface CatalogProduct {
   amount: number
   /** Original price in USD major units — present only when the product is on sale. */
   originalAmount?: number
+  /** Unique size values extracted from all variants (e.g. ["S","M","L","XL"]). */
+  sizes: string[]
+  /** Unique colour names extracted from all variants (e.g. ["Black","White"]). */
+  colors: string[]
+  /** Category handles this product belongs to — used for client-side filtering. */
+  categoryHandles: string[]
+  /** True when the product carries the Medusa tag "new" (admin-controlled). */
+  isNew: boolean
 }
 
-/** A category chip's display-ready data (maps 1:1 to `CategoryTabs` props). */
-interface CatalogCategory {
+/** A category chip's display-ready data. */
+export interface CatalogCategory {
   handle: string
   name: string
 }
@@ -104,28 +112,25 @@ interface ProductDetail {
 /**
  * Field selections. Only `+`/`*` prefixes are used so Medusa's default product
  * fields (title, handle, thumbnail, …) are preserved while these relations are
- * added: gallery images, variant SKUs, and the region-priced `calculated_price`.
+ * added. Variant options and categories are now included so the catalog grid
+ * can drive client-side size/color/category filters without a separate fetch.
  */
 const PRODUCT_FIELDS =
-  "+thumbnail,*images,+variants.sku,*variants.calculated_price"
+  "+thumbnail,*images,+variants.sku,*variants.calculated_price" +
+  ",*variants.options,*variants.options.option,*categories,*tags"
 
 /**
- * Richer selection for the PDP: the catalog fields plus each variant's title,
- * product-option values (Color / Size), and live inventory, needed to build the
- * variant picker with real variant ids and real stock (INTEGRATION-03).
- * `inventory_quantity` is Medusa's computed available count for the request's
- * sales channel; `manage_inventory`/`allow_backorder` flag variants that are
- * always purchasable. Kept separate so the lighter `PRODUCT_FIELDS` still drives
- * the catalog grids without fetching relations/inventory they don't render.
+ * Richer selection for the PDP: catalog fields plus variant title, live
+ * inventory, and backorder flags. Variant options are already in PRODUCT_FIELDS.
  */
 const PRODUCT_DETAIL_FIELDS =
   PRODUCT_FIELDS +
-  ",+variants.title,*variants.options,*variants.options.option" +
+  ",+variants.title" +
   ",+variants.inventory_quantity,+variants.manage_inventory" +
   ",+variants.allow_backorder"
 
-/** Default number of tiles for the home catalog grid. */
-const HOME_PRODUCT_LIMIT = 12
+/** Number of tiles for the home catalog grid — large enough for meaningful filtering. */
+const HOME_PRODUCT_LIMIT = 50
 
 /** Upper bound for a single category listing (no pagination in v1). */
 const CATEGORY_PRODUCT_LIMIT = 100
@@ -294,6 +299,21 @@ function toCatalogProduct(
     return null
   }
 
+  const variants = product.variants ?? []
+  const sizes = Array.from(
+    new Set(variants.map((v) => optionValue(v, /size/i)).filter(Boolean))
+  )
+  const colors = Array.from(
+    new Set(variants.map((v) => optionValue(v, /colou?r/i)).filter(Boolean))
+  )
+  const categoryHandles = (product.categories ?? [])
+    .map((c) => c.handle ?? "")
+    .filter(Boolean)
+
+  const isNew = (product.tags ?? []).some(
+    (t) => t.value?.toLowerCase() === "new"
+  )
+
   return {
     productId: referenceFor(product),
     handle: product.handle ?? "",
@@ -302,6 +322,10 @@ function toCatalogProduct(
     imageAlt: product.title ?? "",
     amount: priced.amount,
     originalAmount: priced.originalAmount,
+    sizes,
+    colors,
+    categoryHandles,
+    isNew,
   }
 }
 

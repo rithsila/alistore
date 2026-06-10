@@ -30,7 +30,7 @@ import {
 // Run with: npx medusa exec ./src/scripts/dev-seed-catalog-fixtures.ts
 
 const SALE_PRODUCT_HANDLE = "shorts"
-const SALE_PRICE_USD = 7
+const SALE_PRICE_USD = 12 // 20% off $15 base price
 const SOLD_OUT_PRODUCT_HANDLE = "sweatpants"
 const SOLD_OUT_SIZE = "XL"
 const PRICE_LIST_TITLE = "Dev catalog fixtures — TEST-01 sale"

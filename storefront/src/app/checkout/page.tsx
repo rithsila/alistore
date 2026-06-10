@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import TopNav from "../../components/layout/TopNav"
@@ -13,6 +13,7 @@ import DeliveryForm, {
 import FacebookLogin from "../../components/checkout/FacebookLogin"
 import GoogleLogin from "../../components/checkout/GoogleLogin"
 import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
+import { getCart } from "@lib/cart"
 import { formatPrice } from "@lib/price"
 import { useCurrency } from "@lib/currency-context"
 
@@ -59,9 +60,6 @@ import { useCurrency } from "@lib/currency-context"
 // CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
 const DELIVERY_FEE = 1.5
 const FREE_DELIVERY_THRESHOLD = 50
-
-// Placeholder bag subtotal until the SDK cart is wired (INTEGRATION-02).
-const PLACEHOLDER_SUBTOTAL = 65
 
 type PaymentMethod = "khqr" | "cod"
 
@@ -146,8 +144,17 @@ export default function CheckoutPage() {
   const [payment, setPayment] = useState<PaymentMethod>("khqr")
   const [isPlacing, setIsPlacing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [subtotal, setSubtotal] = useState(0)
 
-  const subtotal = PLACEHOLDER_SUBTOTAL
+  useEffect(() => {
+    let active = true
+    getCart().then((cart) => {
+      if (active) setSubtotal(cart?.subtotal ?? 0)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
   const qualifiesForFreeDelivery = subtotal >= FREE_DELIVERY_THRESHOLD
   const deliveryFee = qualifiesForFreeDelivery ? 0 : DELIVERY_FEE
   const total = subtotal + deliveryFee

@@ -167,7 +167,7 @@ function resolvePaymentMethod(order: PlacedOrder): string {
   const providers = (order.payment_collections ?? []).flatMap((pc) =>
     (pc.payments ?? []).map((p) => p.provider_id)
   )
-  if (providers.includes(KHPAY_PROVIDER_ID)) return "KHQR (KHPAY)"
+  if (providers.includes(KHPAY_PROVIDER_ID)) return "KHQR"
   if (providers.includes(PAYWAY_PROVIDER_ID)) return "KHQR (ABA PayWay)"
   if (providers.includes(BAKONG_PROVIDER_ID)) return "KHQR"
   if (providers.includes(MANUAL_PAYMENT_PROVIDER_ID)) return "COD"

@@ -36,8 +36,11 @@ interface ProductCardProps {
   /**
    * Original price in USD major units. When provided the tile is treated as on
    * sale: the original is struck through in mute and `amount` renders in accent.
+   * A discount-percent badge is computed and shown on the image automatically.
    */
   originalAmount?: number
+  /** When true, renders a "NEW" badge on the image. */
+  isNew?: boolean
 }
 
 // Matches the FRONTEND-06 grid: 4-up (≥1440) / 3-up (desktop) / 2-up (≤1023) / 1-up (≤599).
@@ -45,6 +48,9 @@ const IMAGE_SIZES =
   "(min-width: 1440px) 25vw, (min-width: 1024px) 33vw, (min-width: 600px) 50vw, 100vw"
 
 const PRICE_TYPE = "text-base font-medium leading-normal"
+
+const BADGE =
+  "rounded-base bg-ink px-2 py-1 text-xs font-medium leading-none text-canvas"
 
 export default function ProductCard({
   productId,
@@ -54,8 +60,12 @@ export default function ProductCard({
   imageAlt,
   amount,
   originalAmount,
+  isNew = false,
 }: ProductCardProps) {
   const isOnSale = originalAmount !== undefined
+  const discountPercent = isOnSale
+    ? Math.round((1 - amount / originalAmount!) * 100)
+    : undefined
 
   return (
     <Link href={`/product/${handle}`} className="flex flex-col">
@@ -67,6 +77,14 @@ export default function ProductCard({
           sizes={IMAGE_SIZES}
           className="object-cover"
         />
+        {(isNew || discountPercent !== undefined) && (
+          <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
+            {isNew && <span className={BADGE}>NEW</span>}
+            {discountPercent !== undefined && (
+              <span className={BADGE}>-{discountPercent}%</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 pt-2">

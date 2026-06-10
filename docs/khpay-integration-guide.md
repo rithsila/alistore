@@ -8,11 +8,11 @@ repo, dormant (env-gated).
 
 ## Locked decisions (2026-06-10)
 
-| Decision | Choice | Why |
-|---|---|---|
-| Rail | **Bakong KHQR** (`POST /bakong/generate`) | Settles directly to OUR Bakong account (configured once in KHPAY dashboard → Settings → Bakong) — not through KHPAY's PayWay link, which is the ABA-license path that was refused. |
-| Checkout UX | **In-store QR + polling** | KHPAY returns the raw EMV KHQR string; the existing pay screen renders it and polls — customer never leaves the storefront. No deeplink on this rail (`deeplink: null`; the CTA self-hides). |
-| Confirmation | **Polling only** | Backend verifies via `POST /bakong/check` (≥3s cached). No webhook/callback_url configured, no public callback endpoint exists for KHPAY. |
+| Decision     | Choice                                            | Why                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rail         | **Bakong KHQR** (`POST /bakong/generate`) | Settles directly to OUR Bakong account (configured once in KHPAY dashboard → Settings → Bakong) — not through KHPAY's PayWay link, which is the ABA-license path that was refused.           |
+| Checkout UX  | **In-store QR + polling**                   | KHPAY returns the raw EMV KHQR string; the existing pay screen renders it and polls — customer never leaves the storefront. No deeplink on this rail (`deeplink: null`; the CTA self-hides). |
+| Confirmation | **Polling only**                            | Backend verifies via `POST /bakong/check` (≥3s cached). No webhook/callback_url configured, no public callback endpoint exists for KHPAY.                                                    |
 
 ## Architecture
 
@@ -52,19 +52,18 @@ Key files:
 
 ## Env vars
 
-| Var | Notes |
-|---|---|
-| `KHPAY_API_KEY` | Provider registers only when set. Dashboard → Settings → API keys. Rotate via `POST /keys/{id}/rotate`. |
-| `KHPAY_BASE_URL` | Default `https://khpay.site/api/v1`; boot-validated. |
-| `KHPAY_EXPIRES_MINUTES` | Default 20 — keep equal to the reservation TTL. |
-| `KHPAY_DEV_ALLOW_LOOPBACK` | Dev-only mock escape; inert in production. |
+| Var                          | Notes                                                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `KHPAY_API_KEY`            | Provider registers only when set. Dashboard → Settings → API keys. Rotate via `POST /keys/{id}/rotate`. |
+| `KHPAY_BASE_URL`           | Default `https://khpay.site/api/v1`; boot-validated.                                                      |
+| `KHPAY_EXPIRES_MINUTES`    | Default 20 — keep equal to the reservation TTL.                                                            |
+| `KHPAY_DEV_ALLOW_LOOPBACK` | Dev-only mock escape; inert in production.                                                                  |
 
 ## Running the e2e spec
 
 1. Backend :9000 + storefront :8000 running, TEST-01 fixtures + Cambodia
    shipping option seeded.
-2. `backend/.env` carries the KHPAY dev-mock block (`KHPAY_BASE_URL=
-   http://127.0.0.1:4285/api/v1`, mock key, dev flag) — restart after editing.
+2. `backend/.env` carries the KHPAY dev-mock block (`KHPAY_BASE_URL= http://127.0.0.1:4285/api/v1`, mock key, dev flag) — restart after editing.
 3. `cd storefront && npx playwright test tests/khpay.spec.ts`
 
 While the dev-mock block is set, `/store/payments/khpay/*` 502s whenever the
@@ -73,23 +72,23 @@ mock isn't listening — that's expected outside spec runs.
 ## UAT checklist (KHPAY-06 — human gated)
 
 - [ ] KHPAY account + Dashboard → Settings → Bakong configured (account_id =
-      our Bakong account, merchant name "Ali Store", city Phnom Penh).
+  our Bakong account, merchant name "Ali Store", city Phnom Penh).
 - [ ] Production API key minted; `KHPAY_API_KEY` set; dev-mock block removed.
 - [ ] `GET /me` shows `bakong_configured: true`.
-- [ ] Real ~$0.50 payment: storefront journey → scan in a real banking app →
-      order flips paid → money arrives in the Bakong account.
-- [x] Real `bk_…` id shape confirmed (2026-06-10): `bk_` + 16 UPPERCASE hex —
-      matches `KHPAY_REFERENCE_PATTERN`.
-- [x] KHR confirmed REJECTED by the live gateway (`"currency must be USD"`,
-      `error_code: VALIDATION_ERROR` — note: live envelope uses `error_code`,
-      not the documented `code`; the client accepts both). The start route now
-      always charges USD (the cart's base denomination); the display toggle
-      remains display-only.
-- [x] `GET /me` verified (2026-06-10): key valid, `bakong_configured: true`,
-      plan "basic".
+- [X] Real ~$0.50 payment: storefront journey → scan in a real banking app →
+  order flips paid → money arrives in the Bakong account.
+- [X] Real `bk_…` id shape confirmed (2026-06-10): `bk_` + 16 UPPERCASE hex —
+  matches `KHPAY_REFERENCE_PATTERN`.
+- [X] KHR confirmed REJECTED by the live gateway (`"currency must be USD"`,
+  `error_code: VALIDATION_ERROR` — note: live envelope uses `error_code`,
+  not the documented `code`; the client accepts both). The start route now
+  always charges USD (the cart's base denomination); the display toggle
+  remains display-only.
+- [X] `GET /me` verified (2026-06-10): key valid, `bakong_configured: true`,
+  plan "basic".
 - [ ] Plan quota: Free = 100 req/day; one 20-min checkout polling at the 3s
-      verify cache can make ~hundreds of check calls. Budget Starter+ or
-      lengthen `VERIFY_PENDING_TTL` before go-live.
+  verify cache can make ~hundreds of check calls. Budget Starter+ or
+  lengthen `VERIFY_PENDING_TTL` before go-live.
 - [ ] Fees/settlement terms confirmed; aggregator-risk owner documented
-      (KHPAY sits between us and Bakong — outage or misconduct blocks
-      checkout; COD remains the fallback path).
+  (KHPAY sits between us and Bakong — outage or misconduct blocks
+  checkout; COD remains the fallback path).

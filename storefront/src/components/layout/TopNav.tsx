@@ -236,10 +236,7 @@ export default function TopNav() {
           </ul>
 
           <div className="mt-auto border-t border-hairline-soft px-4 py-xl">
-            <CurrencyToggle
-              currency={currency}
-              onChange={setCurrency}
-            />
+            <CurrencyToggle currency={currency} onChange={setCurrency} />
           </div>
         </div>
       </div>
