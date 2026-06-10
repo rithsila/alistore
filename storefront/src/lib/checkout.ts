@@ -531,10 +531,11 @@ export async function startKhqr(): Promise<KhqrSession> {
   // Fetch cart total for KHQR card display (non-critical — QR encodes the real amount).
   let cartTotal = 0
   try {
-    const { cart: cartData } = await sdk.store.cart.retrieve(cartId, {
-      fields: "total",
-      headers,
-    })
+    const { cart: cartData } = await sdk.store.cart.retrieve(
+      cartId,
+      { fields: "total" },
+      headers
+    )
     cartTotal = (cartData?.total as number) ?? 0
   } catch {
     // Amount display degrades to 0.00; payment itself is unaffected.

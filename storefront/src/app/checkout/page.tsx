@@ -13,7 +13,7 @@ import DeliveryForm, {
 import FacebookLogin from "../../components/checkout/FacebookLogin"
 import GoogleLogin from "../../components/checkout/GoogleLogin"
 import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
-import { getCart } from "@lib/cart"
+import { getCart, type Cart } from "@lib/cart"
 import { formatPrice } from "@lib/price"
 import { useCurrency } from "@lib/currency-context"
 
@@ -33,13 +33,14 @@ import { useCurrency } from "@lib/currency-context"
  * exactly the sale price and the "Pay with KHQR" CTA — a method selector is
  * neither, so this whole page is accent-free.
  *
- * Placeholder summary, per the FRONTEND-15 precedent: amounts are in-memory USD
- * with the same locked delivery rule (flat $1.50, free once subtotal ≥ $50 —
- * CLARIFY-04). The displayed amounts render through the shared `@lib/price`
- * `formatPrice` in the currency the nav toggle selected (`useCurrency`), so the
- * summary switches between USD and KHR with the toggle; the threshold logic stays
- * in USD. Reading the live cart from the Medusa SDK and sourcing the fee from
- * backend settings (BACKEND-01) remain follow-ups.
+ * The order summary reads the live session cart (`getCart`) and lists every bag
+ * line (name, variant, quantity, line total) above the totals — the PDP
+ * "Pay with KHQR" express path checks out the **whole bag**, so the summary must
+ * show exactly what the total covers. Delivery uses the locked rule (flat $1.50,
+ * free once subtotal ≥ $50 — CLARIFY-04). Amounts render through the shared
+ * `@lib/price` `formatPrice` in the nav-toggle currency (`useCurrency`); the
+ * threshold logic stays in USD. Sourcing the fee from backend settings
+ * (BACKEND-01) remains a follow-up.
  *
  * COD submission is wired (INTEGRATION-04): the COD branch calls
  * `placeCodOrder` (`@lib/checkout`), which preps the cart + POSTs
@@ -144,17 +145,24 @@ export default function CheckoutPage() {
   const [payment, setPayment] = useState<PaymentMethod>("khqr")
   const [isPlacing, setIsPlacing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [subtotal, setSubtotal] = useState(0)
+  const [cart, setCart] = useState<Cart | null>(null)
 
   useEffect(() => {
     let active = true
-    getCart().then((cart) => {
-      if (active) setSubtotal(cart?.subtotal ?? 0)
-    })
+    getCart()
+      .then((result) => {
+        if (active) setCart(result)
+      })
+      .catch(() => {
+        if (active) {
+          setError("We couldn't load your bag. Please refresh the page.")
+        }
+      })
     return () => {
       active = false
     }
   }, [])
+  const subtotal = cart?.subtotal ?? 0
   const qualifiesForFreeDelivery = subtotal >= FREE_DELIVERY_THRESHOLD
   const deliveryFee = qualifiesForFreeDelivery ? 0 : DELIVERY_FEE
   const total = subtotal + deliveryFee
@@ -231,6 +239,34 @@ export default function CheckoutPage() {
             aria-label="Order summary"
             className="flex h-fit flex-col gap-4 small:w-80 small:shrink-0"
           >
+            {cart && cart.lines.length > 0 ? (
+              <ul
+                aria-label={`Bag items (${cart.itemCount})`}
+                className="flex flex-col gap-3 border-b border-hairline pb-4"
+              >
+                {cart.lines.map((line) => (
+                  <li
+                    key={line.id}
+                    className="flex items-start justify-between gap-4"
+                  >
+                    <span className="flex flex-col gap-1">
+                      <span className="text-base font-normal leading-normal text-ink">
+                        {line.name}
+                      </span>
+                      <span className="text-xs font-medium leading-normal text-mute">
+                        {line.variantLabel
+                          ? `${line.variantLabel} · Qty ${line.quantity}`
+                          : `Qty ${line.quantity}`}
+                      </span>
+                    </span>
+                    <span className="text-base font-normal leading-normal text-ink">
+                      {formatPrice(line.lineTotal, currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
             <div className="flex items-center justify-between">
               <span className="text-base font-medium leading-normal text-mute">
                 Subtotal
