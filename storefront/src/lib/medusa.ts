@@ -20,11 +20,14 @@
  *
  * Pricing: the catalog is priced in USD (locked decision — KHR is derived from
  * `USD_KHR_RATE` at display time, see `@lib/price`). Medusa v2 returns
- * `calculated_price.calculated_amount` in **major units**, so amounts are
- * formatted directly with `formatUsd` — never divided by 100. A `region_id` is
- * required for Medusa to compute `calculated_price`; the flat storefront has no
- * country code in the URL, so the region is resolved once from `/store/regions`
- * (preferring `NEXT_PUBLIC_DEFAULT_REGION`, else the first region).
+ * `calculated_price.calculated_amount` in **major units**, so amounts are passed
+ * straight through as raw USD numbers — never divided by 100. The display
+ * currency (USD/KHR) is applied client-side at render time (`ui/Price` /
+ * `useCurrency`) so prices switch instantly with the nav toggle, rather than
+ * being baked into a USD string here. A `region_id` is required for Medusa to
+ * compute `calculated_price`; the flat storefront has no country code in the
+ * URL, so the region is resolved once from `/store/regions` (preferring
+ * `NEXT_PUBLIC_DEFAULT_REGION`, else the first region).
  *
  * Scope: product- and category-level catalog reads for Home / Category / PDP
  * (INTEGRATION-01). The PDP additionally binds **real per-variant inventory** to
@@ -33,7 +36,6 @@
  */
 
 import { sdk } from "@lib/config"
-import { formatUsd } from "@lib/price"
 import { HttpTypes } from "@medusajs/types"
 
 /** A catalog tile's display-ready data (maps 1:1 to `ProductCard` props). */
@@ -48,10 +50,10 @@ interface CatalogProduct {
   imageSrc: string
   /** Accessible alt text. */
   imageAlt: string
-  /** Display-ready current price, e.g. "$29.00". */
-  price: string
-  /** Display-ready original price — present only when the product is on sale. */
-  originalPrice?: string
+  /** Current price in USD major units (e.g. `29` = $29.00); formatted at render. */
+  amount: number
+  /** Original price in USD major units — present only when the product is on sale. */
+  originalAmount?: number
 }
 
 /** A category chip's display-ready data (maps 1:1 to `CategoryTabs` props). */
@@ -89,8 +91,10 @@ export interface ProductDetailVariant {
 interface ProductDetail {
   productId: string
   name: string
-  price: string
-  originalPrice?: string
+  /** Current price in USD major units (e.g. `29` = $29.00); formatted at render. */
+  amount: number
+  /** Original price in USD major units — present only when the product is on sale. */
+  originalAmount?: number
   /** Gallery images, in order (maps to `Gallery` props). */
   images: { src: string; alt: string }[]
   /** Selectable variants with real Medusa ids (maps to `VariantPicker`). */
@@ -171,16 +175,17 @@ async function resolveRegionId(): Promise<string | null> {
 }
 
 /**
- * Extract the cheapest in-catalog price for a product.
+ * Extract the cheapest in-catalog price for a product, in USD major units.
  *
- * Returns the display-ready current price and, when the cheapest variant is
- * discounted (`calculated_amount < original_amount`), the struck original.
- * Returns `null` when no variant carries a calculated price (such a product
- * can't be shown "with a price", so callers skip it).
+ * Returns the current amount and, when the cheapest variant is discounted
+ * (`calculated_amount < original_amount`), the original amount (the struck
+ * price). Amounts are raw numbers — the display currency (USD/KHR) is applied at
+ * render time. Returns `null` when no variant carries a calculated price (such a
+ * product can't be shown "with a price", so callers skip it).
  */
 function extractPrice(
   product: HttpTypes.StoreProduct
-): { price: string; originalPrice?: string } | null {
+): { amount: number; originalAmount?: number } | null {
   const priced = (product.variants ?? []).filter(
     (variant) => variant.calculated_price?.calculated_amount != null
   )
@@ -201,10 +206,10 @@ function extractPrice(
   const original = calculated.original_amount as number | null | undefined
 
   if (original != null && original > amount) {
-    return { price: formatUsd(amount), originalPrice: formatUsd(original) }
+    return { amount, originalAmount: original }
   }
 
-  return { price: formatUsd(amount) }
+  return { amount }
 }
 
 /** Product reference for the card/PDP caption: first variant SKU, else handle. */
@@ -295,8 +300,8 @@ function toCatalogProduct(
     name: product.title ?? "",
     imageSrc: product.thumbnail ?? product.images?.[0]?.url ?? BLANK_IMAGE,
     imageAlt: product.title ?? "",
-    price: priced.price,
-    originalPrice: priced.originalPrice,
+    amount: priced.amount,
+    originalAmount: priced.originalAmount,
   }
 }
 
@@ -437,8 +442,8 @@ export async function getProductDetail(
   return {
     productId: referenceFor(product),
     name: product.title ?? "",
-    price: priced.price,
-    originalPrice: priced.originalPrice,
+    amount: priced.amount,
+    originalAmount: priced.originalAmount,
     images,
     variants: (product.variants ?? []).map(toDetailVariant),
   }

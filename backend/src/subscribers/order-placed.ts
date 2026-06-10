@@ -32,6 +32,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import type { Logger } from "@medusajs/framework/types"
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
 import { BAKONG_PROVIDER_ID } from "../modules/bakong-payment"
+import { PAYWAY_PROVIDER_ID } from "../modules/aba-payway"
 import { usdToKhr } from "../lib/settings"
 
 /** Medusa's built-in manual provider — the COD payment session (BACKEND-04). */
@@ -147,6 +148,7 @@ function resolvePaymentMethod(order: PlacedOrder): string {
   const providers = (order.payment_collections ?? []).flatMap((pc) =>
     (pc.payments ?? []).map((p) => p.provider_id)
   )
+  if (providers.includes(PAYWAY_PROVIDER_ID)) return "KHQR (ABA PayWay)"
   if (providers.includes(BAKONG_PROVIDER_ID)) return "KHQR"
   if (providers.includes(MANUAL_PAYMENT_PROVIDER_ID)) return "COD"
   return "Unknown"

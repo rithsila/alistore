@@ -51,3 +51,6 @@ yarn-error.log*
 # ---- Medusa misc ----
 medusa-db.sql
 **/uploads/
+
+# ABA PayWay sandbox credentials (real creds — never commit)
+sandbox/credential_info.txt

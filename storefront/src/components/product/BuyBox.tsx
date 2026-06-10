@@ -3,6 +3,7 @@
 import { Scan } from "@medusajs/icons"
 
 import PillButton from "../ui/PillButton"
+import Price from "../ui/Price"
 
 /**
  * PDP action block — price + buy actions (FRONTEND-14).
@@ -21,18 +22,19 @@ import PillButton from "../ui/PillButton"
  *   across FRONTEND-14/15/16).
  *
  * Both CTAs are enabled only when a variant is selected (`hasSelectedVariant`),
- * driven by the parent PDP page from `VariantPicker` (FRONTEND-13). Presentational:
- * prices arrive display-ready (already formatted/currency-applied).
+ * driven by the parent PDP page from `VariantPicker` (FRONTEND-13). Prices arrive
+ * as raw USD amounts and render through the currency-reactive `ui/Price` island,
+ * so they switch between USD and KHR the instant the nav toggle flips.
  */
 
 interface BuyBoxProps {
-  /** Display-ready current price (e.g. "$29.00"). */
-  price: string
+  /** Current price in USD major units (e.g. `29` = $29.00). */
+  amount: number
   /**
-   * Display-ready original price. When provided the block is treated as on
-   * sale: the original is struck through in mute and `price` renders in accent.
+   * Original price in USD major units. When provided the block is treated as on
+   * sale: the original is struck through in mute and `amount` renders in accent.
    */
-  originalPrice?: string
+  originalAmount?: number
   /** Buy actions are enabled only when a variant is selected. */
   hasSelectedVariant: boolean
   onAddToBag?: () => void
@@ -41,30 +43,34 @@ interface BuyBoxProps {
 
 const PRICE_TYPE = "text-2xl font-medium leading-normal"
 
+// CLARIFY-04 (locked): free delivery once the subtotal reaches $50 (USD base).
+const FREE_DELIVERY_THRESHOLD = 50
+
 // Outline accent CTA: same geometry as PillButton, accent border + text.
 const KHQR_BUTTON =
   "inline-flex h-12 w-full items-center justify-center gap-2 rounded-pill border border-accent bg-canvas px-6 py-3 text-base font-medium leading-normal text-accent transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 
 export default function BuyBox({
-  price,
-  originalPrice,
+  amount,
+  originalAmount,
   hasSelectedVariant,
   onAddToBag,
   onPayWithKhqr,
 }: BuyBoxProps) {
-  const isOnSale = originalPrice !== undefined
+  const isOnSale = originalAmount !== undefined
 
   return (
     <div className="flex flex-col gap-6">
       {isOnSale ? (
         <div className="flex items-center gap-2">
-          <span className={`${PRICE_TYPE} text-mute line-through`}>
-            {originalPrice}
-          </span>
-          <span className={`${PRICE_TYPE} text-accent`}>{price}</span>
+          <Price
+            amount={originalAmount}
+            className={`${PRICE_TYPE} text-mute line-through`}
+          />
+          <Price amount={amount} className={`${PRICE_TYPE} text-accent`} />
         </div>
       ) : (
-        <span className={`${PRICE_TYPE} text-ink`}>{price}</span>
+        <Price amount={amount} className={`${PRICE_TYPE} text-ink`} />
       )}
 
       <div className="flex flex-col gap-3">
@@ -88,7 +94,7 @@ export default function BuyBox({
       </div>
 
       <p className="text-xs font-medium leading-normal text-mute">
-        Free delivery over $50
+        Free delivery over <Price amount={FREE_DELIVERY_THRESHOLD} />
       </p>
     </div>
   )

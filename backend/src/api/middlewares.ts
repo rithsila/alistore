@@ -6,7 +6,8 @@
  */
 import { defineMiddlewares } from "@medusajs/framework/http"
 import { khqrStartMiddlewares } from "./store/payments/khqr/start/middlewares"
+import { paywayStartMiddlewares } from "./store/payments/payway/start/middlewares"
 
 export default defineMiddlewares({
-  routes: [...khqrStartMiddlewares],
+  routes: [...khqrStartMiddlewares, ...paywayStartMiddlewares],
 })

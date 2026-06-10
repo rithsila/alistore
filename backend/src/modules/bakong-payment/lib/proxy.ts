@@ -6,19 +6,23 @@
  * (security.md "Payments" + "SSRF"). For the "start" flow the only outbound
  * call is the deeplink lookup; payment verification (status/md5) is BACKEND-03B.
  *
- * SSRF guard (security.md "SSRF (Bakong proxy URL)"):
- *  - the proxy URL comes from env only, never from request input;
- *  - must be `https://`, no embedded credentials;
- *  - host must be on the configured allowlist (when one is set);
- *  - the host must not resolve to a private/loopback/link-local address,
- *    re-checked at call time;
- *  - redirects are rejected (no 3xx following).
+ * SSRF guard (security.md "SSRF (Bakong proxy URL)"): the generic policy
+ * (https-only, no credentials, host allowlist, no private/loopback resolution
+ * re-checked at call time, no redirects) lives in `src/lib/proxy-guard.ts`
+ * (shared with the ABA PayWay client since PAYWAY-01). This module keeps its
+ * original exported API — `assertSafeProxyUrl` / `UnsafeProxyUrlError` — as a
+ * Bakong-labeled wrapper so existing consumers (medusa-config boot check, the
+ * khqr routes' instanceof checks) are unaffected.
  *
  * SECURITY: never log the QR string, token, `reference`, or response bodies.
  */
 
-import { lookup } from "dns/promises"
-import { isIP } from "net"
+import {
+  assertResolvesPublicAddress,
+  assertSafeOutboundUrl,
+  joinUrl,
+  UnsafeOutboundUrlError,
+} from "../../../lib/proxy-guard"
 
 /** Bakong Open API path (mirrored by the proxy) for deeplink generation. */
 const DEEPLINK_PATH = "generate_deeplink_by_qr"
@@ -28,6 +32,9 @@ const CHECK_MD5_PATH = "check_transaction_by_md5"
 
 /** Default network timeout for the proxy call. */
 const DEFAULT_TIMEOUT_MS = 8000
+
+/** Env-var label used in all Bakong SSRF error messages. */
+const ENV_LABEL = "BAKONG_PROXY_URL"
 
 /** Raised when the proxy/Bakong is unreachable or returns an error → maps to 502. */
 export class BakongProxyError extends Error {
@@ -66,42 +73,13 @@ export interface GenerateDeeplinkOptions {
   timeoutMs?: number
 }
 
-/** True for IPv4/IPv6 addresses that must never be reachable via the proxy. */
-function isPrivateAddress(address: string): boolean {
-  const family = isIP(address)
-  if (family === 4) {
-    const [a, b] = address.split(".").map(Number)
-    if (a === 10) return true
-    if (a === 127) return true // loopback
-    if (a === 0) return true
-    if (a === 169 && b === 254) return true // link-local
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
-    return false
-  }
-  if (family === 6) {
-    const ip = address.toLowerCase()
-    if (ip === "::1" || ip === "::") return true // loopback / unspecified
-    if (ip.startsWith("fe80")) return true // link-local
-    if (ip.startsWith("fc") || ip.startsWith("fd")) return true // unique-local
-    // IPv4-mapped (::ffff:a.b.c.d) — re-check the embedded v4 address.
-    const mapped = ip.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-    if (mapped) return isPrivateAddress(mapped[1])
-    return false
-  }
-  return false
-}
-
 /**
  * Dev-only escape hatch (TEST-04): allow a plain-http LOOPBACK mock proxy so
  * the KHQR paid flip can be simulated end-to-end against the dev stack
  * (storefront/tests/khqr.spec.ts hosts the mock). Two explicit gates — the
  * process must NOT be production AND `BAKONG_PROXY_DEV_ALLOW_LOOPBACK=1` must
- * be set — and the relaxation applies to loopback targets only (127.0.0.0/8,
- * `::1`, `localhost`). Every other SSRF rule (allowlist, all other private
- * ranges, no credentials, no redirects) stays enforced. Inert in production:
- * `NODE_ENV=production` disables it regardless of the flag.
+ * be set — and the relaxation applies to loopback targets only. Every other
+ * SSRF rule stays enforced. Inert in production.
  */
 function devLoopbackEscapeActive(): boolean {
   return (
@@ -110,69 +88,28 @@ function devLoopbackEscapeActive(): boolean {
   )
 }
 
-/** Loopback hosts the dev escape may target (the ONLY relaxation it grants). */
-function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase()
-  if (host === "localhost") return true
-  const family = isIP(host)
-  if (family === 4) return host.startsWith("127.")
-  if (family === 6) return host === "::1"
-  return false
-}
-
-/** Loopback addresses (IPv4 127/8, `::1`, and the IPv4-mapped form). */
-function isLoopbackAddress(address: string): boolean {
-  if (isIP(address) === 4) return address.startsWith("127.")
-  const ip = address.toLowerCase()
-  return ip === "::1" || /^::ffff:127\./.test(ip)
-}
-
 /**
  * Validate the proxy URL shape (https, no creds, allowlisted host). Throws
  * `UnsafeProxyUrlError` on any violation. Does not perform DNS resolution.
  */
 export function assertSafeProxyUrl(rawUrl: string, allowedHosts?: string[]): URL {
-  let url: URL
   try {
-    url = new URL(rawUrl)
-  } catch {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL is not a valid URL")
+    return assertSafeOutboundUrl(rawUrl, {
+      label: ENV_LABEL,
+      allowedHosts,
+      devLoopbackActive: devLoopbackEscapeActive(),
+    })
+  } catch (err) {
+    if (err instanceof UnsafeOutboundUrlError) {
+      throw new UnsafeProxyUrlError(
+        err.message.replace(
+          `${ENV_LABEL} requires a host allowlist in production (SSRF allowlist required)`,
+          "BAKONG_PROXY_ALLOWED_HOSTS must be set in production (SSRF allowlist required)"
+        )
+      )
+    }
+    throw err
   }
-
-  // Dev-only mock-proxy escape — see devLoopbackEscapeActive. Loopback targets
-  // may use plain http and skip the private-IP rejection; nothing else changes.
-  const devLoopback = devLoopbackEscapeActive() && isLoopbackHost(url.hostname)
-
-  if (url.protocol !== "https:" && !(devLoopback && url.protocol === "http:")) {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must use https")
-  }
-  if (url.username || url.password) {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must not embed credentials")
-  }
-
-  // In production the SSRF allowlist is mandatory (security.md: "host on
-  // hard-coded allowlist"). Without it, any public https host would be allowed.
-  if (
-    process.env.NODE_ENV === "production" &&
-    (!allowedHosts || allowedHosts.length === 0)
-  ) {
-    throw new UnsafeProxyUrlError(
-      "BAKONG_PROXY_ALLOWED_HOSTS must be set in production (SSRF allowlist required)"
-    )
-  }
-
-  const host = url.hostname.toLowerCase()
-  if (allowedHosts && allowedHosts.length > 0 && !allowedHosts.includes(host)) {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL host is not allowlisted")
-  }
-
-  // A literal private IP in the URL is rejected outright (loopback excepted
-  // under the dev escape).
-  if (isIP(host) && isPrivateAddress(host) && !devLoopback) {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL must not target a private IP")
-  }
-
-  return url
 }
 
 /**
@@ -180,37 +117,17 @@ export function assertSafeProxyUrl(rawUrl: string, allowedHosts?: string[]): URL
  * (defends against DNS rebinding). Throws `UnsafeProxyUrlError` otherwise.
  */
 async function assertResolvesPublic(hostname: string): Promise<void> {
-  if (isIP(hostname)) {
-    return // already validated as a non-private literal in assertSafeProxyUrl
-  }
-  // Dev escape: only a loopback HOSTNAME (i.e. `localhost`) may resolve to a
-  // loopback address — a public-looking name resolving to 127.x stays rejected
-  // even in dev (rebinding defense intact).
-  const allowLoopback = devLoopbackEscapeActive() && isLoopbackHost(hostname)
-  let records: { address: string }[]
   try {
-    records = await lookup(hostname, { all: true })
-  } catch {
-    throw new UnsafeProxyUrlError("Cannot resolve BAKONG_PROXY_URL host")
-  }
-  if (records.length === 0) {
-    throw new UnsafeProxyUrlError("BAKONG_PROXY_URL host resolved to no address")
-  }
-  for (const { address } of records) {
-    if (allowLoopback && isLoopbackAddress(address)) {
-      continue
+    await assertResolvesPublicAddress(hostname, {
+      label: ENV_LABEL,
+      devLoopbackActive: devLoopbackEscapeActive(),
+    })
+  } catch (err) {
+    if (err instanceof UnsafeOutboundUrlError) {
+      throw new UnsafeProxyUrlError(err.message)
     }
-    if (isPrivateAddress(address)) {
-      throw new UnsafeProxyUrlError(
-        "BAKONG_PROXY_URL host resolves to a private address"
-      )
-    }
+    throw err
   }
-}
-
-function joinUrl(base: URL, path: string): string {
-  const trimmed = base.href.endsWith("/") ? base.href : `${base.href}/`
-  return new URL(path, trimmed).href
 }
 
 /**

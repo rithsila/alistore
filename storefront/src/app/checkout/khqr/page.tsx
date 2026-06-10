@@ -205,7 +205,7 @@ export default function KhqrPayPage() {
             <div className="rounded-large border border-hairline bg-canvas p-6">
               <QRCodeSVG
                 value={session.qr}
-                title="Bakong KHQR payment code"
+                title="KHQR payment code"
                 size={QR_SIZE}
                 level="M"
                 marginSize={2}

@@ -1,5 +1,6 @@
 import { loadEnv, defineConfig } from '@medusajs/framework/utils'
 import { assertSafeProxyUrl } from './src/modules/bakong-payment/lib/proxy'
+import { assertSafePayWayUrl } from './src/modules/aba-payway/lib/client'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
@@ -93,6 +94,17 @@ if (bakongProxyUrl) {
   )
 }
 
+// ABA PayWay (PAYWAY-01/02): direct HTTPS gateway — no proxy. SSRF boot check
+// mirrors the Bakong one above: validate the base URL against the hard-coded
+// host allowlist at startup so a misconfigured/poisoned PAYWAY_BASE_URL fails
+// fast instead of mid-checkout. DNS resolution is re-checked at call time in
+// lib/client.ts. The dev loopback escape (PAYWAY_DEV_ALLOW_LOOPBACK=1,
+// non-production) admits only the local mock gateway.
+const paywayBaseUrl = process.env.PAYWAY_BASE_URL
+if (paywayBaseUrl) {
+  assertSafePayWayUrl(paywayBaseUrl)
+}
+
 // Auth Module providers (BACKEND-05B/05C). Specifying `providers` overrides the
 // framework default, so `emailpass` MUST stay listed — admin login + MFA
 // (security.md) depend on it. The Facebook and Google providers are each added
@@ -143,22 +155,38 @@ const authModule = {
   options: { providers: authProviders },
 }
 
+// Payment providers. Bakong stays registered (dormant wiring — the storefront
+// flow now targets PayWay, ImplementPlan Phase 6 locked decision); ABA PayWay
+// registers only when its merchant credentials are present (same conditional
+// pattern as the auth providers) so dev boots without them.
+const paymentProviders: Record<string, unknown>[] = [
+  {
+    resolve: "./src/modules/bakong-payment",
+    id: "khqr",
+    options: {
+      bakongAccount: process.env.BAKONG_ACCOUNT || "",
+      merchantName: process.env.BAKONG_MERCHANT_NAME || "Ali Store",
+      merchantCity: process.env.BAKONG_MERCHANT_CITY || "Phnom Penh",
+      expiresInMinutes:
+        Number(process.env.BAKONG_QR_EXPIRES_MINUTES) || 20,
+    },
+  },
+]
+if (process.env.PAYWAY_MERCHANT_ID && process.env.PAYWAY_API_KEY) {
+  paymentProviders.push({
+    resolve: "./src/modules/aba-payway",
+    id: "khqr",
+    options: {
+      // Payment lifetime == stock-reservation TTL (one constant, PAYWAY-05).
+      expiresInMinutes: Number(process.env.PAYWAY_EXPIRES_MINUTES) || 20,
+    },
+  })
+}
+
 const paymentModule = {
   resolve: "@medusajs/medusa/payment",
   options: {
-    providers: [
-      {
-        resolve: "./src/modules/bakong-payment",
-        id: "khqr",
-        options: {
-          bakongAccount: process.env.BAKONG_ACCOUNT || "",
-          merchantName: process.env.BAKONG_MERCHANT_NAME || "Ali Store",
-          merchantCity: process.env.BAKONG_MERCHANT_CITY || "Phnom Penh",
-          expiresInMinutes:
-            Number(process.env.BAKONG_QR_EXPIRES_MINUTES) || 20,
-        },
-      },
-    ],
+    providers: paymentProviders,
   },
 }
 

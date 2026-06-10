@@ -13,6 +13,8 @@ import DeliveryForm, {
 import FacebookLogin from "../../components/checkout/FacebookLogin"
 import GoogleLogin from "../../components/checkout/GoogleLogin"
 import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
+import { formatPrice } from "@lib/price"
+import { useCurrency } from "@lib/currency-context"
 
 /**
  * Checkout page (FRONTEND-16) — route `/checkout`.
@@ -31,9 +33,12 @@ import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
  * neither, so this whole page is accent-free.
  *
  * Placeholder summary, per the FRONTEND-15 precedent: amounts are in-memory USD
- * with a local formatter and the same locked delivery rule (flat $1.50, free
- * once subtotal ≥ $50 — CLARIFY-04). Reading the live cart from the Medusa SDK
- * and sourcing the fee from backend settings (BACKEND-01) remain follow-ups.
+ * with the same locked delivery rule (flat $1.50, free once subtotal ≥ $50 —
+ * CLARIFY-04). The displayed amounts render through the shared `@lib/price`
+ * `formatPrice` in the currency the nav toggle selected (`useCurrency`), so the
+ * summary switches between USD and KHR with the toggle; the threshold logic stays
+ * in USD. Reading the live cart from the Medusa SDK and sourcing the fee from
+ * backend settings (BACKEND-01) remain follow-ups.
  *
  * COD submission is wired (INTEGRATION-04): the COD branch calls
  * `placeCodOrder` (`@lib/checkout`), which preps the cart + POSTs
@@ -69,7 +74,7 @@ interface PaymentOption {
 const PAYMENT_OPTIONS: PaymentOption[] = [
   {
     value: "khqr",
-    title: "Bakong KHQR",
+    title: "KHQR",
     description: "Scan to pay with any Cambodian banking app.",
   },
   {
@@ -78,11 +83,6 @@ const PAYMENT_OPTIONS: PaymentOption[] = [
     description: "Pay in cash when your order arrives.",
   },
 ]
-
-/** Minimal USD display formatter (FRONTEND-22 supplies the full USD/KHR one). */
-function formatUsd(amount: number): string {
-  return `$${amount.toFixed(2)}`
-}
 
 interface PaymentChoiceProps {
   selected: PaymentMethod
@@ -139,6 +139,7 @@ function PaymentChoice({ selected, onSelect }: PaymentChoiceProps) {
 
 export default function CheckoutPage() {
   const router = useRouter()
+  const { currency } = useCurrency()
   const [details, setDetails] = useState<DeliveryDetails>(
     EMPTY_DELIVERY_DETAILS
   )
@@ -228,7 +229,7 @@ export default function CheckoutPage() {
                 Subtotal
               </span>
               <span className="text-base font-medium leading-normal text-ink">
-                {formatUsd(subtotal)}
+                {formatPrice(subtotal, currency)}
               </span>
             </div>
 
@@ -237,7 +238,9 @@ export default function CheckoutPage() {
                 Delivery
               </span>
               <span className="text-base font-medium leading-normal text-ink">
-                {deliveryFee === 0 ? "Free" : formatUsd(deliveryFee)}
+                {deliveryFee === 0
+                  ? "Free"
+                  : formatPrice(deliveryFee, currency)}
               </span>
             </div>
 
@@ -246,12 +249,13 @@ export default function CheckoutPage() {
                 Total
               </span>
               <span className="text-2xl font-medium leading-normal text-ink">
-                {formatUsd(total)}
+                {formatPrice(total, currency)}
               </span>
             </div>
 
             <p className="text-xs font-medium leading-normal text-mute">
-              Free delivery over $50
+              Free delivery over{" "}
+              {formatPrice(FREE_DELIVERY_THRESHOLD, currency)}
             </p>
 
             {error && (

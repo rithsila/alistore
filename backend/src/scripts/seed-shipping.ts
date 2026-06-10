@@ -84,8 +84,10 @@ export default async function seedShipping({ container }: ExecArgs) {
   }
 
   // ── Fulfillment provider (the built-in manual provider) ────────────────────
+  // No `is_enabled` filter — the prop isn't filterable in this @medusajs/types
+  // pin; the manual provider is enabled by default and we pick it by id below.
   const providers = await fulfillment.listFulfillmentProviders(
-    { is_enabled: true },
+    {},
     { take: null }
   )
   const provider =
@@ -212,7 +214,7 @@ export default async function seedShipping({ container }: ExecArgs) {
 
   // ── Shipping option (create only if the service zone has none) ─────────────
   const existingOptions = await fulfillment.listShippingOptions(
-    { service_zone_id: serviceZoneId },
+    { service_zone: { id: serviceZoneId } },
     { take: 1 }
   )
   if (existingOptions.length > 0) {

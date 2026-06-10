@@ -342,14 +342,15 @@ export async function placeCodOrder(
 // ── KHQR (INTEGRATION-05) ─────────────────────────────────────────────────────
 
 /**
- * KHQR start/poll layer — INTEGRATION-05.
+ * KHQR start/poll layer — INTEGRATION-05, cut over to ABA PayWay (PAYWAY-06).
  *
- * Connects the checkout to the Bakong KHQR endpoints (BACKEND-03 / BACKEND-03B):
- *  - `startKhqr` → `POST /store/payments/khqr/start` generates the dynamic QR +
- *    deeplink and reserves stock for the payment window;
- *  - `pollKhqrStatus` → `GET /store/payments/khqr/status?reference=` reports
+ * Connects the checkout to the PayWay KHQR endpoints (PAYWAY-03 / PAYWAY-03B —
+ * same contract the Bakong routes had, so the pay screen is unchanged):
+ *  - `startKhqr` → `POST /store/payments/payway/start` creates the PayWay
+ *    purchase (QR + ABA deeplink) and reserves stock for the payment window;
+ *  - `pollKhqrStatus` → `GET /store/payments/payway/status?reference=` reports
  *    `pending | paid | expired`; on `paid` the backend has already verified the
- *    payment server-side and created the order.
+ *    payment server-side (check-transaction-2) and created the order.
  *
  * These two functions are the seam the KHQR pay screen (FRONTEND-18) drives —
  * they replace the screen's placeholder seam while keeping the same
@@ -448,10 +449,14 @@ async function getSelectedCurrency(): Promise<Currency> {
   return value === "KHR" ? "KHR" : "USD"
 }
 
-/** `md5(qr)` — 32 lowercase hex chars (matches the backend reference schema). */
-const REFERENCE_PATTERN = /^[a-f0-9]{32}$/
+/**
+ * Minted PayWay tran_id — 20 lowercase hex chars (matches the backend
+ * reference schema, PAYWAY-03B). Was 32 (md5) under the direct-Bakong
+ * provider; PayWay replaced it as the active KHQR provider (Phase 6).
+ */
+const REFERENCE_PATTERN = /^[a-f0-9]{20}$/
 
-/** `POST /store/payments/khqr/start` response (BACKEND-03). */
+/** `POST /store/payments/payway/start` response (PAYWAY-03). */
 export interface KhqrSession {
   qr: string
   deeplink: string | null
@@ -459,7 +464,7 @@ export interface KhqrSession {
   expires_at: string | null
 }
 
-/** `GET /store/payments/khqr/status` response (BACKEND-03B). */
+/** `GET /store/payments/payway/status` response (PAYWAY-03B). */
 export type KhqrStatus =
   | { status: "pending" }
   | { status: "paid"; order_id: string; invoice_token?: string }
@@ -495,7 +500,7 @@ export async function startKhqr(): Promise<KhqrSession> {
   let session: KhqrSession
   try {
     session = await sdk.client.fetch<KhqrSession>(
-      "/store/payments/khqr/start",
+      "/store/payments/payway/start",
       {
         method: "POST",
         body: { cart_id: cartId, currency },
@@ -544,12 +549,15 @@ export async function pollKhqrStatus(reference: string): Promise<KhqrStatus> {
 
   let result: KhqrStatus
   try {
-    result = await sdk.client.fetch<KhqrStatus>("/store/payments/khqr/status", {
-      method: "GET",
-      query: { reference },
-      headers,
-      cache: "no-store",
-    })
+    result = await sdk.client.fetch<KhqrStatus>(
+      "/store/payments/payway/status",
+      {
+        method: "GET",
+        query: { reference },
+        headers,
+        cache: "no-store",
+      }
+    )
   } catch {
     // Transient/transport error — let the pay screen keep polling. Generic
     // message only; never surface the backend error envelope (security.md).

@@ -122,8 +122,8 @@ export default function ProductPage({ params }: ProductPageProps) {
               />
 
               <BuyBox
-                price={product.price}
-                originalPrice={product.originalPrice}
+                amount={product.amount}
+                originalAmount={product.originalAmount}
                 hasSelectedVariant={selectedVariant !== null}
                 onAddToBag={handleAddToBag}
               />
