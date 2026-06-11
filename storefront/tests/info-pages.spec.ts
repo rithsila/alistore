@@ -35,4 +35,33 @@ test.describe("footer info pages (FRONTEND-23)", () => {
     ).toBeVisible()
     await expect(page.getByText(/within 3 days/)).toBeVisible()
   })
+
+  test("footer links navigate to the info pages", async ({ page }) => {
+    await page.goto("/", { waitUntil: "domcontentloaded" })
+    const footer = page.locator("footer")
+    await expect(footer.getByRole("link", { name: "FAQ" })).toHaveAttribute(
+      "href",
+      "/faq"
+    )
+    await expect(
+      footer.getByRole("link", { name: "Delivery Info" })
+    ).toHaveAttribute("href", "/delivery")
+    await expect(footer.getByRole("link", { name: "Returns" })).toHaveAttribute(
+      "href",
+      "/returns"
+    )
+  })
+
+  test("info pages have no horizontal overflow at 360px", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    for (const path of ["/faq", "/delivery", "/returns"]) {
+      await page.goto(path, { waitUntil: "domcontentloaded" })
+      const overflows = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth >
+          document.documentElement.clientWidth
+      )
+      expect(overflows, `${path} should not overflow at 360px`).toBe(false)
+    }
+  })
 })

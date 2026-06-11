@@ -44,7 +44,7 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     heading: "Help",
     links: [
-      { label: "FAQ", href: "/" },
+      { label: "FAQ", href: "/faq" },
       { label: "Contact Us", href: "https://t.me/doung_seyha", external: true },
       { label: "Size Guide", href: "/" },
     ],
@@ -52,9 +52,9 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     heading: "Delivery",
     links: [
-      { label: "Delivery Info", href: "/" },
+      { label: "Delivery Info", href: "/delivery" },
       { label: "Track Order", href: "/" },
-      { label: "Returns", href: "/" },
+      { label: "Returns", href: "/returns" },
     ],
   },
   {
