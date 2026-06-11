@@ -50,13 +50,12 @@ interface NavLink {
   href: string
 }
 
-// Placeholder category links for the nav shell (real categories wired later).
 const NAV_LINKS: readonly NavLink[] = [
-  { label: "New", href: "/" },
-  { label: "Women", href: "/" },
-  { label: "Men", href: "/" },
-  { label: "Kids", href: "/" },
-  { label: "Sale", href: "/" },
+  { label: "New", href: "/category/new" },
+  { label: "Women", href: "/category/women" },
+  { label: "Men", href: "/category/men" },
+  { label: "Kids", href: "/category/kids" },
+  { label: "Sale", href: "/category/sale" },
 ]
 
 const CURRENCIES: readonly Currency[] = ["USD", "KHR"]

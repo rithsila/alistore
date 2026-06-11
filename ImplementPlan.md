@@ -690,8 +690,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `tests/google-login.spec.ts`
 - **Acceptance Criteria**: One identity row created (`provider=google`); session returned.
 
-### TEST-09: Responsive & in-app browser
+### ✅ TEST-09: Responsive & in-app browser
 
+- _Completed 2026-06-11 — `storefront/tests/responsive.md` (200-line manual UAT checklist): Track A covers viewport reflow at 360/768/1440 grounded in the exact breakpoints from the real components (`TopNav` hamburger ≤599, `BottomBar` hidden ≥600, `ProductGrid` 1→2→3→4-up at 600/1024/1440, `FilterSidebar` drawer <1024 / rail ≥1024, `Checkout` stacked <1024 / two-column ≥1024); expected layout table disambiguates the three test widths (768 = desktop nav + drawer filter + 2-up grid, all independent). Track B covers Facebook and Telegram in-app browsers (nav collapse, filter drawer, `BottomBar` reachability, KHQR polling → paid redirect, Facebook OAuth top-level redirect, Google OAuth external-browser fallback). Four known constraints documented: C1 Google WebView block + external-browser workaround; C2 KHQR deeplink IAB limitation + QR-scan primary path; C3 timer throttling on backgrounded IAB; C4 `BottomBar` normal-flow design. Track A is runnable now against `npm run dev`; grid reflow already green in `catalog.spec.ts`. Track B is a go-live UAT gate — requires deployed HTTPS storefront + real devices + Facebook/Telegram apps — same deferred posture as INTEGRATION-10 (Telegram live send) and TEST-10 (runtime a11y layer). No code touched (checklist-only task)._
 - **Objective**: Verify mobile-first behavior.
 - **Requirements**: Test at 360/768/1440 and inside Facebook/Telegram in-app browsers (nav collapse, filter drawer, polling, OAuth redirect).
 - **Dependencies**: INTEGRATION-05, INTEGRATION-06

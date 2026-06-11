@@ -23,7 +23,18 @@ const CAMBODIA_REGION_NAME = "Cambodia"
 // English names only for v1 per the locked English-first decision (CLARIFY-02);
 // Khmer category labels are deferred to v2. Each category has an explicit,
 // stable handle used in storefront URLs.
+//
+// Two tiers:
+//   - Audience nav categories (new/women/men/kids/sale) — top-level nav bar
+//   - Product-type categories (t-shirt/polo/…) — category pill tabs on the PLP
 const STOREFRONT_CATEGORIES: ReadonlyArray<{ name: string; handle: string }> = [
+  // Audience nav categories (wired to TopNav links)
+  { name: "New", handle: "new" },
+  { name: "Women", handle: "women" },
+  { name: "Men", handle: "men" },
+  { name: "Kids", handle: "kids" },
+  { name: "Sale", handle: "sale" },
+  // Product-type categories (wired to CategoryTabs pill row)
   { name: "T-shirt", handle: "t-shirt" },
   { name: "Polo", handle: "polo" },
   { name: "Outerwear", handle: "outerwear" },
