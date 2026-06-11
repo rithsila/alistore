@@ -15,4 +15,16 @@ test.describe("footer info pages (FRONTEND-23)", () => {
     ).toBeVisible()
     await expect(page.getByText("How do I order?")).toBeVisible()
   })
+
+  test("Delivery page shows the fee and the free-over-threshold", async ({
+    page,
+  }) => {
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" })
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Delivery Information" })
+    ).toBeVisible()
+    // Flat $1.50, free over $50 — the locked CLARIFY-04 rule.
+    await expect(page.getByText("$1.50")).toBeVisible()
+    await expect(page.getByText(/\$50/)).toBeVisible()
+  })
 })
