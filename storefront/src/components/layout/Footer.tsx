@@ -24,9 +24,10 @@ import Link from "next/link"
  *
  * Presentational Server Component — no client interactivity. Columns are a
  * 2-up grid on mobile (standard clothing-store mobile footer — avoids a tall
- * 1-up stack) widening to 4-up at ≥1024. Links use
- * placeholder `/` hrefs (real Help/Delivery routes and the Telegram/Facebook
- * channel URLs are not wired yet), consistent with TopNav's placeholder nav.
+ * 1-up stack) widening to 4-up at ≥1024. The FAQ, Delivery Info, and Returns
+ * links route to their info pages (`/faq`, `/delivery`, `/returns`);
+ * Telegram/Facebook are external URLs. Size Guide and Track Order remain
+ * placeholder `/` links pending their own pages.
  */
 
 interface FooterLink {
