@@ -627,8 +627,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `tests/cart.spec.ts`
 - **Acceptance Criteria**: Below threshold adds fee; at/above shows free; KHR integer.
 
-### TEST-03: COD end-to-end
+### ✅ TEST-03: COD end-to-end
 
+- **Completed 2026-06-11** — `storefront/tests/cod.spec.ts`: UI journey (pending_confirmation + stock decrement) + API contract test; Telegram alert deferred to UAT per user decision (security.md hard-codes Bot API host, no mockable dev seam; UAT procedure documented in spec).
 - **Objective**: Verify COD path.
 - **Requirements**: Place COD → order `pending_confirmation` + Telegram alert + stock reserved.
 - **Dependencies**: INTEGRATION-04, INTEGRATION-10
