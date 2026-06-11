@@ -33,6 +33,9 @@ interface CatalogClientProps {
   activeCategory?: string
 }
 
+// TopNav audience handles (New/Women/Men/Kids/Sale) — excluded from filter sidebar to avoid duplication.
+const TOPNAV_HANDLES = new Set(["new", "women", "men", "kids", "sale"])
+
 const EMPTY_SELECTION: FilterSelection = {
   special: [],
   category: [],
@@ -67,7 +70,10 @@ export default function CatalogClient({
   }, [products])
 
   const categoryOptions = useMemo(
-    () => categories.map((c) => ({ value: c.handle, label: c.name })),
+    () =>
+      categories
+        .filter((c) => !TOPNAV_HANDLES.has(c.handle))
+        .map((c) => ({ value: c.handle, label: c.name })),
     [categories]
   )
 

@@ -32,6 +32,7 @@ import Link from "next/link"
 interface FooterLink {
   label: string
   href: string
+  external?: boolean
 }
 
 interface FooterColumn {
@@ -44,7 +45,7 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
     heading: "Help",
     links: [
       { label: "FAQ", href: "/" },
-      { label: "Contact Us", href: "/" },
+      { label: "Contact Us", href: "https://t.me/doung_seyha", external: true },
       { label: "Size Guide", href: "/" },
     ],
   },
@@ -58,11 +59,20 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
   },
   {
     heading: "Telegram",
-    links: [{ label: "Chat on Telegram", href: "/" }],
+    links: [
+      { label: "Channel", href: "https://t.me/olympicclothes", external: true },
+      { label: "Group", href: "https://t.me/SeyhaOLP", external: true },
+    ],
   },
   {
     heading: "Facebook",
-    links: [{ label: "Visit Facebook", href: "/" }],
+    links: [
+      {
+        label: "Visit Facebook",
+        href: "https://www.facebook.com/profile.php?id=100070835905482",
+        external: true,
+      },
+    ],
   },
 ]
 
@@ -88,6 +98,9 @@ export default function Footer() {
                     <Link
                       href={link.href}
                       className="text-sm font-medium leading-normal text-mute transition-opacity hover:opacity-70"
+                      {...(link.external
+                        ? { target: "_blank", rel: "noopener noreferrer" }
+                        : {})}
                     >
                       {link.label}
                     </Link>
