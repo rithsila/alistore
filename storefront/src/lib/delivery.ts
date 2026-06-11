@@ -3,9 +3,10 @@
  *
  * Single source of truth for the storefront's delivery rule — a flat USD fee,
  * free once the subtotal reaches the threshold. Previously duplicated in
- * `app/cart/page.tsx` and `app/checkout/page.tsx`; both now import from here, as
- * does the `/delivery` info page (FRONTEND-23), so the displayed rule can never
- * drift between surfaces.
+ * `app/cart/page.tsx`, `app/checkout/page.tsx`, and
+ * `components/product/BuyBox.tsx`; all three now import from here, as does the
+ * `/delivery` info page (FRONTEND-23), so the displayed rule can never drift
+ * between surfaces.
  *
  * USD major units (1.5 = $1.50). KHR display is derived at render time via the
  * shared `@lib/price` formatter; these values stay in USD.
@@ -17,7 +18,7 @@
  */
 
 /** Flat delivery fee in USD. */
-export const DELIVERY_FEE = 1.5
+export const DELIVERY_FEE: number = 1.5
 
 /** Order subtotal (USD) at or above which delivery is free. */
-export const FREE_DELIVERY_THRESHOLD = 50
+export const FREE_DELIVERY_THRESHOLD: number = 50
