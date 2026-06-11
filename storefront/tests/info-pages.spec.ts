@@ -52,6 +52,16 @@ test.describe("footer info pages (FRONTEND-23)", () => {
     )
   })
 
+  test("each info page has exactly one h1", async ({ page }) => {
+    for (const path of ["/faq", "/delivery", "/returns"]) {
+      await page.goto(path, { waitUntil: "domcontentloaded" })
+      await expect(
+        page.getByRole("heading", { level: 1 }),
+        `${path} should have exactly one h1`
+      ).toHaveCount(1)
+    }
+  })
+
   test("info pages have no horizontal overflow at 360px", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 })
     for (const path of ["/faq", "/delivery", "/returns"]) {

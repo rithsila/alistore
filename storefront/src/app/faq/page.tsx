@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import type { ReactNode } from "react"
 import Link from "next/link"
 import InfoPageLayout from "../../components/layout/InfoPageLayout"
+import { DELIVERY_FEE, FREE_DELIVERY_THRESHOLD } from "@lib/delivery"
 
 export const metadata: Metadata = {
   title: "FAQ — Ali Store",
@@ -38,8 +39,9 @@ const FAQ_ITEMS: readonly FaqItem[] = [
     question: "Where do you deliver and how much does it cost?",
     answer: (
       <>
-        We deliver across Phnom Penh and the provinces. Delivery is a flat $1.50,
-        free on orders over $50. See{" "}
+        We deliver across Phnom Penh and the provinces. Delivery is a flat $
+        {DELIVERY_FEE.toFixed(2)}, free on orders over ${FREE_DELIVERY_THRESHOLD}.
+        See{" "}
         <Link href="/delivery" className={FAQ_LINK}>
           Delivery Info
         </Link>{" "}
