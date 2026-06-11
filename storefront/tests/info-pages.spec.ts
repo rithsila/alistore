@@ -11,7 +11,10 @@ test.describe("footer info pages (FRONTEND-23)", () => {
   test("FAQ page renders its heading and questions", async ({ page }) => {
     await page.goto("/faq", { waitUntil: "domcontentloaded" })
     await expect(
-      page.getByRole("heading", { level: 1, name: "Frequently Asked Questions" })
+      page.getByRole("heading", {
+        level: 1,
+        name: "Frequently Asked Questions",
+      })
     ).toBeVisible()
     await expect(page.getByText("How do I order?")).toBeVisible()
   })
@@ -36,6 +39,55 @@ test.describe("footer info pages (FRONTEND-23)", () => {
     await expect(page.getByText(/within 3 days/)).toBeVisible()
   })
 
+  test("Size Guide page renders the Tops and Bottoms charts", async ({
+    page,
+  }) => {
+    await page.goto("/size-guide", { waitUntil: "domcontentloaded" })
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Size Guide" })
+    ).toBeVisible()
+    // The Asia-fit note from lib/size-guide.
+    await expect(page.getByText(/Asian fit/)).toBeVisible()
+    // One semantic table per chart (Tops + Bottoms).
+    await expect(page.getByRole("table")).toHaveCount(2)
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Tops" })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Bottoms" })
+    ).toBeVisible()
+    // Measurement columns from the lib constants (cm + intl equivalents).
+    await expect(
+      page.getByRole("columnheader", { name: "Chest (cm)" })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("columnheader", { name: "Waist (cm)" })
+    ).toBeVisible()
+  })
+
+  test("Find my size suggests a size from height and weight", async ({
+    page,
+  }) => {
+    await page.goto("/size-guide", { waitUntil: "domcontentloaded" })
+    // The submit stays disabled until the client component hydrates — waiting on
+    // it makes the interaction deterministic (no pre-hydration native submit).
+    const submit = page.getByRole("button", { name: "Find my size" })
+    await expect(submit).toBeEnabled()
+    await page.getByLabel("Height (cm)").fill("170")
+    await page.getByLabel("Weight (kg)").fill("65")
+    await submit.click()
+
+    const result = page.getByText("Your recommended size")
+    await expect(result).toBeVisible()
+    // 65kg / 170cm → M for both tops and bottoms (estimate path).
+    const region = page.locator("section", {
+      has: page.getByRole("heading", { level: 2, name: "Find my size" }),
+    })
+    await expect(region.getByText("Tops ·")).toBeVisible()
+    await expect(region.getByText("Bottoms ·")).toBeVisible()
+    await expect(region.getByText(/Asian fit/)).toBeVisible()
+  })
+
   test("footer links navigate to the info pages", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" })
     const footer = page.locator("footer")
@@ -50,10 +102,13 @@ test.describe("footer info pages (FRONTEND-23)", () => {
       "href",
       "/returns"
     )
+    await expect(
+      footer.getByRole("link", { name: "Size Guide" })
+    ).toHaveAttribute("href", "/size-guide")
   })
 
   test("each info page has exactly one h1", async ({ page }) => {
-    for (const path of ["/faq", "/delivery", "/returns"]) {
+    for (const path of ["/faq", "/delivery", "/returns", "/size-guide"]) {
       await page.goto(path, { waitUntil: "domcontentloaded" })
       await expect(
         page.getByRole("heading", { level: 1 }),
@@ -64,7 +119,7 @@ test.describe("footer info pages (FRONTEND-23)", () => {
 
   test("info pages have no horizontal overflow at 360px", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 })
-    for (const path of ["/faq", "/delivery", "/returns"]) {
+    for (const path of ["/faq", "/delivery", "/returns", "/size-guide"]) {
       await page.goto(path, { waitUntil: "domcontentloaded" })
       const overflows = await page.evaluate(
         () =>

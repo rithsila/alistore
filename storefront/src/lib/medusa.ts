@@ -135,6 +135,12 @@ const HOME_PRODUCT_LIMIT = 50
 /** Upper bound for a single category listing (no pagination in v1). */
 const CATEGORY_PRODUCT_LIMIT = 100
 
+/** Upper bound for a single search results page (no pagination in v1). */
+const SEARCH_PRODUCT_LIMIT = 50
+
+/** Defensive cap on free-text query length before it reaches the backend. */
+const MAX_SEARCH_QUERY_LENGTH = 100
+
 /**
  * 1×1 transparent PNG, used only when a product carries no image at all so
  * `next/image` always receives a non-empty `src`. Seeded products carry
@@ -353,6 +359,40 @@ export async function getCatalogProducts(
   }>("/store/products", {
     method: "GET",
     query: { limit, region_id: regionId, fields: PRODUCT_FIELDS },
+  })
+
+  return (products ?? []).map(toCatalogProduct).filter(isCatalogProduct)
+}
+
+/**
+ * Free-text product search (FRONTEND-23) — backs the `/search` results page.
+ *
+ * Runs the stock Medusa `GET /store/products?q=` keyword match (title /
+ * description / variant SKU) and reuses the catalog mapping so results render in
+ * the same `ProductCard` grid. The query is trimmed and length-capped before use
+ * (defensive bound; the SDK encodes it as a query param — no interpolation). An
+ * empty/whitespace query short-circuits to `[]` with no round-trip, and products
+ * without a calculated price are skipped, exactly like `getCatalogProducts`.
+ */
+export async function searchProducts(
+  query: string,
+  limit: number = SEARCH_PRODUCT_LIMIT
+): Promise<CatalogProduct[]> {
+  const trimmed = query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH)
+  if (!trimmed) {
+    return []
+  }
+
+  const regionId = await resolveRegionId()
+  if (!regionId) {
+    return []
+  }
+
+  const { products } = await sdk.client.fetch<{
+    products: HttpTypes.StoreProduct[]
+  }>("/store/products", {
+    method: "GET",
+    query: { q: trimmed, limit, region_id: regionId, fields: PRODUCT_FIELDS },
   })
 
   return (products ?? []).map(toCatalogProduct).filter(isCatalogProduct)

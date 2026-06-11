@@ -24,10 +24,10 @@ import Link from "next/link"
  *
  * Presentational Server Component — no client interactivity. Columns are a
  * 2-up grid on mobile (standard clothing-store mobile footer — avoids a tall
- * 1-up stack) widening to 4-up at ≥1024. The FAQ, Delivery Info, and Returns
- * links route to their info pages (`/faq`, `/delivery`, `/returns`);
- * Telegram/Facebook are external URLs. Size Guide and Track Order remain
- * placeholder `/` links pending their own pages.
+ * 1-up stack) widening to 4-up at ≥1024. The FAQ, Delivery Info, Returns, and
+ * Size Guide links route to their info pages (`/faq`, `/delivery`, `/returns`,
+ * `/size-guide`); Telegram/Facebook are external URLs. Track Order remains a
+ * placeholder `/` link pending its own page (v2 — needs account/order lookup).
  */
 
 interface FooterLink {
@@ -47,7 +47,7 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
     links: [
       { label: "FAQ", href: "/faq" },
       { label: "Contact Us", href: "https://t.me/doung_seyha", external: true },
-      { label: "Size Guide", href: "/" },
+      { label: "Size Guide", href: "/size-guide" },
     ],
   },
   {

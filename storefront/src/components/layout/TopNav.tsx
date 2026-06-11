@@ -11,6 +11,7 @@ import {
 } from "@medusajs/icons"
 import Chip from "../ui/Chip"
 import CurrencyFlag from "../ui/CurrencyFlag"
+import NavSearch from "./NavSearch"
 import { useCartCount } from "@lib/hooks/use-cart-count"
 import { useCurrency } from "@lib/currency-context"
 import type { Currency } from "@lib/price"
@@ -172,9 +173,7 @@ export default function TopNav() {
         {/* Desktop: currency toggle + search/user/bag */}
         <div className="hidden items-center gap-4 min-[600px]:flex">
           <CurrencyToggle currency={currency} onChange={setCurrency} />
-          <button type="button" aria-label="Search" className={ICON_BUTTON}>
-            <MagnifyingGlass className="h-6 w-6" />
-          </button>
+          <NavSearch />
           <button type="button" aria-label="Account" className={ICON_BUTTON}>
             <User className="h-6 w-6" />
           </button>
@@ -220,19 +219,30 @@ export default function TopNav() {
             </button>
           </div>
 
-          <ul className="flex flex-col px-4 py-xl">
-            {NAV_LINKS.map((link) => (
-              <li key={link.label}>
-                <Link
-                  href={link.href}
-                  onClick={closeDrawer}
-                  className="block py-3 text-base font-medium leading-normal text-ink"
-                >
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <div className="flex flex-col px-4 py-xl">
+            <Link
+              href="/search"
+              onClick={closeDrawer}
+              className="flex items-center gap-2 py-3 text-base font-medium leading-normal text-ink"
+            >
+              <MagnifyingGlass className="h-5 w-5" />
+              Search
+            </Link>
+
+            <ul className="flex flex-col">
+              {NAV_LINKS.map((link) => (
+                <li key={link.label}>
+                  <Link
+                    href={link.href}
+                    onClick={closeDrawer}
+                    className="block py-3 text-base font-medium leading-normal text-ink"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
 
           <div className="mt-auto border-t border-hairline-soft px-4 py-xl">
             <CurrencyToggle currency={currency} onChange={setCurrency} />

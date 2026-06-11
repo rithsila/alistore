@@ -40,8 +40,8 @@ const FAQ_ITEMS: readonly FaqItem[] = [
     answer: (
       <>
         We deliver across Phnom Penh and the provinces. Delivery is a flat $
-        {DELIVERY_FEE.toFixed(2)}, free on orders over ${FREE_DELIVERY_THRESHOLD}.
-        See{" "}
+        {DELIVERY_FEE.toFixed(2)}, free on orders over $
+        {FREE_DELIVERY_THRESHOLD}. See{" "}
         <Link href="/delivery" className={FAQ_LINK}>
           Delivery Info
         </Link>{" "}
