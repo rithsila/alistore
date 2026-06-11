@@ -27,4 +27,12 @@ test.describe("footer info pages (FRONTEND-23)", () => {
     await expect(page.getByText("$1.50")).toBeVisible()
     await expect(page.getByText(/\$50/)).toBeVisible()
   })
+
+  test("Returns page states the 3-day exchange policy", async ({ page }) => {
+    await page.goto("/returns", { waitUntil: "domcontentloaded" })
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Returns & Exchanges" })
+    ).toBeVisible()
+    await expect(page.getByText(/within 3 days/)).toBeVisible()
+  })
 })
