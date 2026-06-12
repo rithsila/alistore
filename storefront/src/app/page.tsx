@@ -5,6 +5,19 @@ import CatalogClient from "../components/product/CatalogClient"
 import { getCatalogProducts, getCategories } from "@lib/medusa"
 
 /**
+ * Render this route per-request instead of prerendering it at build time.
+ *
+ * The catalog below is fetched live from the Medusa backend. Static
+ * prerendering executes that fetch during `next build`, so the production
+ * deploy fails with "fetch failed" whenever the backend is unreachable from
+ * the builder (e.g. the Cambodia backend's Cloudflare tunnel is down) — the
+ * exact cause of the failed Vercel build. Forcing dynamic rendering decouples
+ * the build from backend availability and keeps the home page showing live
+ * inventory/prices on every request.
+ */
+export const dynamic = "force-dynamic"
+
+/**
  * Catalog / home landing page (FRONTEND-09, data-wired in INTEGRATION-01).
  *
  * Composes the storefront landing shell:
