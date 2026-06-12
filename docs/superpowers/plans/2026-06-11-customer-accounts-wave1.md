@@ -12,7 +12,7 @@
 
 **Scope of this plan (Wave 1):** session unification, OAuth return-intent, account shell + guard, nav popover, account home, profile (name/phone), logout. **Deferred to Wave 2 (separate plan):** order history, saved addresses, guest `/track` lookup.
 
-**Proposed ImplementPlan.md IDs (next-free):** FRONTEND-25 (storefront account work), BACKEND-11 (OAuth return-intent), TEST-12 (account E2E). Assign when folding into `ImplementPlan.md`.
+**Assigned ImplementPlan.md IDs:** FRONTEND-25 (Task 1 — session reads), BACKEND-11 (Task 2 — OAuth return-intent, ✅ done), FRONTEND-26 (Task 3 — nav popover + logout), FRONTEND-27 (Task 4 — account shell + home), FRONTEND-28 (Task 5 — profile), TEST-12 (Task 6 — account E2E). The storefront work (originally sketched under one ID) was split into FRONTEND-25→28 when folded into `ImplementPlan.md`.
 
 ---
 
@@ -34,7 +34,7 @@ This repo has **no unit-test runner** in the storefront — every `storefront/te
 |------|----------------|------|
 | `storefront/src/lib/data/session-headers.ts` (new) | Shared session-aware auth headers (JWT **and** `connect.sid`) | 1 |
 | `storefront/src/lib/auth.ts` (modify) | Reuse the shared header builder instead of its private copy | 1 |
-| `storefront/src/lib/data/customer.ts` (modify) | `retrieveCustomer`/`updateCustomer` session-aware + `no-store`; add `logout` | 1, 4 |
+| `storefront/src/lib/data/customer.ts` (modify) | `retrieveCustomer`/`updateCustomer` session-aware + `no-store` (Task 1); add `logout` (Task 3, its first consumer) | 1, 3 |
 | `backend/src/api/store/auth/{facebook,google}/route.ts` (modify) | Accept `?intent=`, store allowlisted `return_to` in the state entry | 2 |
 | `backend/src/api/store/auth/{facebook,google}/callback/route.ts` (modify) | Redirect to the stored, re-validated `return_to` | 2 |
 | `storefront/src/lib/account.ts` (new) | `getAccountMenuState()` server action for the nav | 3 |
@@ -170,7 +170,9 @@ git commit -m "refactor: unify session-aware customer reads (connect.sid + JWT)"
 
 ---
 
-## Task 2: OAuth return-intent (Facebook + Google)
+## Task 2: OAuth return-intent (Facebook + Google) — ✅ DONE
+
+> ✅ **Completed** as BACKEND-11 (commit `ac4ae4a`, branch `feat/footer-info-pages`; backend `npm run build` green). The code below is **as-shipped** — it hardens the original sketch: an `as const` map + literal-key type guard (`isReturnIntent`) keeps the lookup prototype-pollution-safe, and the callback derives its allowlist via `new Set(Object.values(RETURN_PATHS))` (DRY) instead of a hand-listed set. Backward compatible: state entries without `return_to`, and logins with no `intent`, resolve to the unchanged `/checkout` default.
 
 **Why:** the callbacks hard-redirect to `/checkout` (`facebook/callback/route.ts:51,309`; google `:127,548`). Login from the account popover must return to `/account`, but `security.md` forbids echoing a client redirect target. Resolve the destination server-side from an allowlisted `?intent=` and carry it in the existing single-use Redis state entry.
 
@@ -180,25 +182,29 @@ git commit -m "refactor: unify session-aware customer reads (connect.sid + JWT)"
 - Modify: `backend/src/api/store/auth/google/route.ts`
 - Modify: `backend/src/api/store/auth/google/callback/route.ts`
 
-- [ ] **Step 1: Add the intent allowlist to the Facebook start route**
+- [x] **Step 1: Add the intent allowlist to the Facebook start route**
 
 In `backend/src/api/store/auth/facebook/route.ts`, add near the other constants (after `STATE_COOKIE`):
 
 ```ts
 /**
- * Post-login destinations keyed by the public `intent` query param. security.md:
- * redirect targets come from a hard-coded allowlist, never echoed client input.
+ * Optional `?intent=` → post-login return path. security.md: redirect targets
+ * come from a hard-coded allowlist, never echoed client input. The `as const`
+ * map + literal-key type guard keep the lookup prototype-pollution-safe.
  * Unknown/absent intent → /checkout (the pre-account default, unchanged).
  */
-const RETURN_TO_BY_INTENT: Record<string, string> = {
-  checkout: "/checkout",
-  account: "/account",
+const RETURN_PATHS = { checkout: "/checkout", account: "/account" } as const
+type ReturnIntent = keyof typeof RETURN_PATHS
+const DEFAULT_RETURN_INTENT: ReturnIntent = "checkout"
+
+/** Narrow an arbitrary query value to a known intent key. */
+function isReturnIntent(value: unknown): value is ReturnIntent {
+  return value === "checkout" || value === "account"
 }
 
+/** Resolve the optional intent query to its hard-coded return path. */
 function resolveReturnTo(intent: unknown): string {
-  return (
-    (typeof intent === "string" && RETURN_TO_BY_INTENT[intent]) || "/checkout"
-  )
+  return RETURN_PATHS[isReturnIntent(intent) ? intent : DEFAULT_RETURN_INTENT]
 }
 ```
 
@@ -215,58 +221,68 @@ Then, in `GET`, where the state is stored (line ~206), capture and persist the r
   )
 ```
 
-- [ ] **Step 2: Honor the stored target in the Facebook callback**
+- [x] **Step 2: Honor the stored target in the Facebook callback**
 
 In `backend/src/api/store/auth/facebook/callback/route.ts`:
 
-Replace the `STOREFRONT_RETURN_PATH` constant (line ~51) with an allowlist set:
+Replace the `STOREFRONT_RETURN_PATH` constant (line ~51) with the allowlist + resolver (mirrors the start route's `RETURN_PATHS`; the allowlist is derived, not hand-listed):
 
 ```ts
 /**
- * Allowlisted post-login destinations (must mirror the start route's
- * RETURN_TO_BY_INTENT values). The callback re-validates the stored target as
- * defense in depth; anything else falls back to /checkout.
+ * Allowlisted post-login destinations (mirror the start route's RETURN_PATHS).
+ * The callback re-validates the stored target as defense in depth; anything
+ * else falls back to /checkout.
  */
-const RETURN_TO_ALLOWLIST = new Set<string>(["/checkout", "/account"])
-const DEFAULT_RETURN_PATH = "/checkout"
+const RETURN_PATHS = { checkout: "/checkout", account: "/account" } as const
+const DEFAULT_RETURN_PATH = RETURN_PATHS.checkout
+const ALLOWED_RETURN_PATHS: ReadonlySet<string> = new Set(
+  Object.values(RETURN_PATHS)
+)
+
+/** Re-validate the state-stored return path against the hard-coded allowlist. */
+function resolveReturnPath(stored: unknown): string {
+  return typeof stored === "string" && ALLOWED_RETURN_PATHS.has(stored)
+    ? stored
+    : DEFAULT_RETURN_PATH
+}
 ```
 
-Type the state read so `return_to` is visible (line ~191):
+Type the state read so `return_to` is visible and resolve it immediately after the CSRF triple-check passes (line ~191) — never before, so a forged value can't influence anything pre-validation:
 
 ```ts
   const cookieState = readCookie(req, STATE_COOKIE)
-  const storedState = await cache.get<{ return_to?: string }>(stateKey(state))
+  const storedState = await cache.get<{ return_to?: unknown }>(stateKey(state))
   if (!cookieState || cookieState !== state || storedState === null) {
     return fail(res, 401, "invalid_state", requestId)
   }
+  // Post-login return path the start route stashed in the (now verified) state.
+  const returnTo = resolveReturnPath(storedState.return_to)
 ```
 
 Finally, replace the terminal `res.redirect(302, STOREFRONT_RETURN_PATH)` (line ~309) with:
 
 ```ts
-  const returnTo =
-    storedState?.return_to && RETURN_TO_ALLOWLIST.has(storedState.return_to)
-      ? storedState.return_to
-      : DEFAULT_RETURN_PATH
   res.redirect(302, returnTo)
 ```
 
-- [ ] **Step 3: Mirror both changes in the Google routes**
+- [x] **Step 3: Mirror both changes in the Google routes**
 
 Apply Step 1 verbatim to `backend/src/api/store/auth/google/route.ts` (same constants; same `return_to` capture at its `cache.set` on line ~208).
 
 Apply Step 2 verbatim to `backend/src/api/store/auth/google/callback/route.ts` (replace `STOREFRONT_RETURN_PATH` at line ~127, type the `storedState` read at line ~396, replace the terminal redirect at line ~548).
 
-- [ ] **Step 4: Type-check the backend**
+- [x] **Step 4: Type-check the backend**
 
 Run: `cd backend && npm run build`
-Expected: build succeeds.
+Expected: build succeeds. ✅ Verified green (backend 6.42s, frontend 24.04s).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+
+Shipped as (4 auth files only):
 
 ```bash
 git add backend/src/api/store/auth/facebook backend/src/api/store/auth/google
-git commit -m "feat: server-side allowlisted OAuth return intent (account vs checkout)"
+git commit -m "feat: add intent-based post-login redirect to social auth (BACKEND-11)"
 ```
 
 Behavioural proof arrives in Task 6 (login with `?intent=account` lands on `/account`; the existing `google-login.spec.ts`/`fb-login.spec.ts` still land on `/checkout`, proving the default is unchanged).
@@ -276,11 +292,52 @@ Behavioural proof arrives in Task 6 (login with `?intent=account` lands on `/acc
 ## Task 3: Nav popover (`AccountMenu`)
 
 **Files:**
+- Modify: `storefront/src/lib/data/customer.ts` (add `logout` — moved here from the old Task 4 so it is defined at its first consumer)
 - Create: `storefront/src/lib/account.ts`
 - Create: `storefront/src/components/layout/AccountMenu.tsx`
 - Modify: `storefront/src/components/layout/TopNav.tsx`
 
-- [ ] **Step 1: Server action for menu state**
+- [ ] **Step 1: Logout server action**
+
+Defined here (not in Task 4) because the popover below imports it; committing Task 3 now includes `customer.ts`, so the build never carries a dangling import. In `storefront/src/lib/data/customer.ts`, add `nextCookies` to the top imports and a `logout` action. This replaces the starter's broken `signout` (it redirects to `/${countryCode}/account`, a 404 here):
+
+```ts
+import { cookies as nextCookies } from "next/headers"
+
+/**
+ * Sign the customer out. Clears the starter JWT and expires the social
+ * `connect.sid` session cookie on this origin, then revalidates the customer
+ * cache and returns home.
+ *
+ * Known limitation (Wave 2 hardening): the backend express-session record
+ * lingers until its TTL; expiring the cookie makes it unreachable from the
+ * browser, which is sufficient for v1. A proxied server-side session destroy is
+ * a follow-up.
+ */
+export async function logout() {
+  try {
+    await sdk.auth.logout()
+  } catch {
+    // No JWT session (social login) — nothing to revoke server-side here.
+  }
+
+  await removeAuthToken()
+
+  const cookieStore = await nextCookies()
+  cookieStore.set("connect.sid", "", { maxAge: -1, path: "/" })
+
+  const customerCacheTag = await getCacheTag("customers")
+  revalidateTag(customerCacheTag)
+
+  await removeCartId()
+
+  redirect("/")
+}
+```
+
+(`removeAuthToken`, `removeCartId`, `getCacheTag`, `revalidateTag`, `redirect`, `sdk` are already imported in this file. Leave the old `signout` in place if other code references it, or delete it if not — check `grep -rn "signout" storefront/src` first.)
+
+- [ ] **Step 2: Server action for menu state**
 
 Create `storefront/src/lib/account.ts`:
 
@@ -313,7 +370,7 @@ export async function getAccountMenuState(): Promise<AccountMenuState | null> {
 }
 ```
 
-- [ ] **Step 2: The popover component**
+- [ ] **Step 3: The popover component**
 
 Create `storefront/src/components/layout/AccountMenu.tsx`:
 
@@ -444,7 +501,7 @@ export default function AccountMenu() {
 }
 ```
 
-- [ ] **Step 3: Mount it in `TopNav`**
+- [ ] **Step 4: Mount it in `TopNav`**
 
 In `storefront/src/components/layout/TopNav.tsx`:
 
@@ -475,69 +532,30 @@ In the mobile drawer, add account entries after the `Search` link (after line 23
 
 (`User` is already imported in `TopNav.tsx:7`.) The `/account` guard (Task 4) sends guests who tap this back to `/`, so one entry serves both states without duplicating the popover in the drawer.
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 5: Type-check**
 
 Run: `cd storefront && npm run build`
 Expected: build succeeds.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add storefront/src/lib/account.ts storefront/src/components/layout/AccountMenu.tsx storefront/src/components/layout/TopNav.tsx
-git commit -m "feat: account nav popover (social sign-in / account links)"
+git add storefront/src/lib/data/customer.ts storefront/src/lib/account.ts storefront/src/components/layout/AccountMenu.tsx storefront/src/components/layout/TopNav.tsx
+git commit -m "feat: account nav popover + logout (social sign-in / account links)"
 ```
 
 ---
 
-## Task 4: Account shell (guard + home + logout)
+## Task 4: Account shell (guard + home)
 
 **Files:**
-- Modify: `storefront/src/lib/data/customer.ts` (add `logout`)
 - Create: `storefront/src/components/account/AccountNav.tsx`
 - Create: `storefront/src/app/account/layout.tsx`
 - Create: `storefront/src/app/account/page.tsx`
 
-- [ ] **Step 1: Logout server action**
+(`logout` is defined in Task 3; `AccountNav` below imports it from `@lib/data/customer` — do not redefine it here.)
 
-In `storefront/src/lib/data/customer.ts`, add `nextCookies` to the top imports and a `logout` action. Replace the broken `signout` (it redirects to `/${countryCode}/account`, a 404 here) by adding:
-
-```ts
-import { cookies as nextCookies } from "next/headers"
-
-/**
- * Sign the customer out. Clears the starter JWT and expires the social
- * `connect.sid` session cookie on this origin, then revalidates the customer
- * cache and returns home.
- *
- * Known limitation (Wave 2 hardening): the backend express-session record
- * lingers until its TTL; expiring the cookie makes it unreachable from the
- * browser, which is sufficient for v1. A proxied server-side session destroy is
- * a follow-up.
- */
-export async function logout() {
-  try {
-    await sdk.auth.logout()
-  } catch {
-    // No JWT session (social login) — nothing to revoke server-side here.
-  }
-
-  await removeAuthToken()
-
-  const cookieStore = await nextCookies()
-  cookieStore.set("connect.sid", "", { maxAge: -1, path: "/" })
-
-  const customerCacheTag = await getCacheTag("customers")
-  revalidateTag(customerCacheTag)
-
-  await removeCartId()
-
-  redirect("/")
-}
-```
-
-(`removeAuthToken`, `removeCartId`, `getCacheTag`, `revalidateTag`, `redirect`, `sdk` are already imported in this file. Leave the old `signout` in place if other code references it, or delete it if not — check `grep -rn "signout" storefront/src` first.)
-
-- [ ] **Step 2: In-account nav + logout control**
+- [ ] **Step 1: In-account nav + logout control**
 
 Create `storefront/src/components/account/AccountNav.tsx`:
 
@@ -581,7 +599,7 @@ export default function AccountNav() {
 }
 ```
 
-- [ ] **Step 3: Guarded layout**
+- [ ] **Step 2: Guarded layout**
 
 Create `storefront/src/app/account/layout.tsx`:
 
@@ -622,7 +640,7 @@ export default async function AccountLayout({
 }
 ```
 
-- [ ] **Step 4: Account home**
+- [ ] **Step 3: Account home**
 
 Create `storefront/src/app/account/page.tsx`:
 
@@ -650,16 +668,16 @@ export default async function AccountHomePage() {
 }
 ```
 
-- [ ] **Step 5: Type-check**
+- [ ] **Step 4: Type-check**
 
 Run: `cd storefront && npm run build`
 Expected: build succeeds; `/account` appears in the route list.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add storefront/src/lib/data/customer.ts storefront/src/components/account/AccountNav.tsx storefront/src/app/account/layout.tsx storefront/src/app/account/page.tsx
-git commit -m "feat: guarded account shell with home + logout"
+git add storefront/src/components/account/AccountNav.tsx storefront/src/app/account/layout.tsx storefront/src/app/account/page.tsx
+git commit -m "feat: guarded account shell with home"
 ```
 
 ---
@@ -970,10 +988,10 @@ git commit -m "test: account E2E (sign-in, guard, home, profile, logout, intent)
 
 ## Self-review (completed during authoring)
 
-- **Spec coverage:** §6 architecture → Tasks 1,4. §7 session unification → Task 1. §8 popover + drawer parity → Task 3. §9 OAuth intent → Task 2. §10 home/profile → Tasks 4,5 (orders/addresses are Wave 2, explicitly deferred). §12 logout → Task 4. §14 testing → Task 6. §15 security (no-store, allowlist, no client ids, phone regex) → Tasks 1,2,5. Guest `/track` (§11) and order/address surfaces are out of this plan by design (Wave 2).
+- **Spec coverage:** §6 architecture → Tasks 1,4. §7 session unification → Task 1. §8 popover + drawer parity → Task 3. §9 OAuth intent → Task 2. §10 home/profile → Tasks 4,5 (orders/addresses are Wave 2, explicitly deferred). §12 logout → Task 3 (defined at its first consumer; Task 4's `AccountNav` imports it). §14 testing → Task 6. §15 security (no-store, allowlist, no client ids, phone regex) → Tasks 1,2,5. Guest `/track` (§11) and order/address surfaces are out of this plan by design (Wave 2).
 - **Type consistency:** `buildSessionHeaders`, `retrieveCustomer`, `getAccountMenuState`, `logout`, `isValidCambodiaPhone`, `updateCustomer` referenced with consistent signatures across tasks. `connect.sid`, `?intent=account`, and the `/checkout`↔`/account` allowlist match between start and callback routes.
 - **No placeholders:** every code step shows complete code; the E2E reuses a named existing file (`google-login.spec.ts`) for identical boilerplate with the exact deltas spelled out.
 
 ## Wave 2 (separate plan, after this ships)
 
-Order history (`/account/orders` → existing `/order/[id]`), saved addresses (CRUD via the existing helpers, session-aware), and guest order lookup (`/track` + `POST /store/orders/lookup`, ULID-keyed + phone, rate-limited) — plus extending the popover/`AccountNav` with Orders + Addresses and wiring the Footer's "Track Order". Mapped to FRONTEND-26+, BACKEND-12, TEST-13.
+Order history (`/account/orders` → existing `/order/[id]`), saved addresses (CRUD via the existing helpers, session-aware), and guest order lookup (`/track` + `POST /store/orders/lookup`, ULID-keyed + phone, rate-limited) — plus extending the popover/`AccountNav` with Orders + Addresses and wiring the Footer's "Track Order". Mapped to FRONTEND-29+, BACKEND-12, TEST-13 (FRONTEND-26→28 are taken by Wave 1).

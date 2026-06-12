@@ -163,13 +163,14 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/lib/settings.ts`
 - **Acceptance Criteria**: Helper returns numeric values; `usdToKhr(1)` returns the configured rate, rounded.
 
-### BACKEND-02: CSV product/variant import
+### ✅ BACKEND-02: CSV product/variant import
 
+- **Completed 2026-06-12** — Deliverables shipped: `imports/products-template.csv` (3 sample products × 6 variants each, authored against Medusa v2.15.3's official product-import column format — one row per variant, Size × Color options, separate USD + KHR price columns, SKUs, image URLs) and `docs/import.md` (column reference, prerequisites, Admin import steps, and the required manual post-import steps). Acceptance criterion amended (this task): Medusa's built-in CSV importer creates inventory *items* but **not** stocked quantities, and cannot set sales-channel/category from CSV (verified against the v2.15.3 importer) — so inventory levels + sales-channel assignment are documented manual post-import steps in `docs/import.md`, not an import side effect. The interactive Admin import itself is an operator action (not executed in-session).
 - **Objective**: Bulk-load catalog with per-size/color variants.
 - **Requirements**: Define the import CSV using **Medusa's official product-import column format** (one row per variant: product title/handle, category, color, size, SKU, USD price, KHR price, initial stock, image URL). No source Google Sheet exists (CLARIFY-09 resolved) — author a **simple ready-made sample clothing catalog** against that format; use Medusa Admin's built-in product import.
 - **Dependencies**: SETUP-09
 - **Deliverables**: `imports/products-template.csv`, `docs/import.md`
-- **Acceptance Criteria**: Importing the template creates products with variants and inventory levels; variants visible in `/store/products`.
+- **Acceptance Criteria**: Importing the template (Medusa Admin → Products → Import) creates products with their Size × Color variants and USD + KHR prices; inventory levels and sales-channel assignment are then set manually post-import per `docs/import.md` (Medusa's CSV importer creates inventory *items* but not stocked quantities, and cannot assign sales-channel/category from CSV); after those steps, variants are visible in `/store/products`.
 
 ### ✅ BACKEND-03: Bakong KHQR payment provider — start ( Done Run security Review)
 
@@ -289,6 +290,15 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Dependencies**: BACKEND-03B
 - **Deliverables**: `src/jobs/expire-reservations.ts`
 - **Acceptance Criteria**: An expired unpaid order is cancelled and its reserved stock returns to available.
+
+### ✅ BACKEND-11: OAuth return intent (account vs checkout)
+
+- _Completed 2026-06-12 — both OAuth start routes (`api/store/auth/facebook/route.ts`, `api/store/auth/google/route.ts`) now accept an optional `?intent=` resolved against a hard-coded `{ checkout: "/checkout", account: "/account" }` map (type-narrowing guard, default `checkout`) and store the resolved path as `return_to` in the existing single-use Redis state entry (`{ issued_at, return_to }`). Both callbacks (`…/facebook/callback`, `…/google/callback`) read `return_to` from the already-verified state, re-validate it against the same path allowlist (defense in depth, default `/checkout`), and use it for the terminal `res.redirect(302, …)` in place of the removed hard-coded `STOREFRONT_RETURN_PATH`. No client redirect URL is ever echoed — the target rides the server-side, single-use state; default `/checkout` behavior is unchanged when no `intent` is supplied (the two OAuth E2E specs, which start without an intent, still land on `/checkout`). Security (security.md): redirect target server-derived from a hard-coded allowlist, prototype-safe lookups (literal-key narrowing on the start side, `Set<string>` membership on the callback side). `npm run build` clean (backend 6.35s + admin 25.60s)._
+- **Objective**: Let social login return the browser to `/account` (login-from-nav) while keeping `/checkout` the default — without echoing any client-supplied redirect target (security.md).
+- **Requirements**: In both OAuth start routes (`api/store/auth/facebook/route.ts`, `api/store/auth/google/route.ts`) accept an optional `?intent=` resolved against a hard-coded map `{ checkout: "/checkout", account: "/account" }` (default `checkout`); store the resolved path in the existing single-use Redis state entry (`{ issued_at, return_to }`). In both callbacks read `return_to` from the already-fetched state entry, re-validate it against the same allowlist (defense in depth; default `/checkout`), and use it for the terminal `res.redirect(302, …)` in place of the hard-coded `STOREFRONT_RETURN_PATH`. No client redirect URL is ever echoed; the target rides the server-side, single-use state. Default `/checkout` behavior is unchanged when no `intent` is supplied. Per plan `docs/superpowers/plans/2026-06-11-customer-accounts-wave1.md` (Task 2) and spec `docs/superpowers/specs/2026-06-11-customer-account-design.md` (§9).
+- **Dependencies**: BACKEND-05, BACKEND-05C
+- **Deliverables**: `backend/src/api/store/auth/facebook/route.ts` (modified), `backend/src/api/store/auth/facebook/callback/route.ts` (modified), `backend/src/api/store/auth/google/route.ts` (modified), `backend/src/api/store/auth/google/callback/route.ts` (modified)
+- **Acceptance Criteria**: `GET /store/auth/{facebook,google}?intent=account` completes login and 302s to `/account`; no `intent` (or an unknown one) 302s to `/checkout`; an unrecognized stored value falls back to `/checkout`; `npm run build` clean.
 
 ---
 
@@ -521,6 +531,38 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `src/lib/size-guide.ts`, `src/app/size-guide/page.tsx`, `src/components/layout/Footer.tsx` (modified — repoint link), `tests/info-pages.spec.ts` (modified — add `/size-guide` coverage)
 - **Acceptance Criteria**: Footer "Size Guide" opens `/size-guide`; page renders Tops + Bottoms tables with cm measurements and intl equivalents derived from `lib/size-guide.ts` (no values hardcoded in the page); Asia-fit note and how-to-measure tips visible; single `h1`; layout holds at 360px with no horizontal page overflow (tables scroll within their wrapper); tokens-only styling, accent unused; Playwright info-pages spec passes; placeholder-measurement NOTE present in the lib file.
 
+### FRONTEND-25: Unified session-aware customer reads
+
+- **Objective**: Make the storefront's customer reads work for social-login sessions (which carry `connect.sid`, not a JWT) so the account area can resolve the signed-in customer.
+- **Requirements**: Extract the dual-credential header builder currently private in `lib/auth.ts` into a shared `src/lib/data/session-headers.ts` (`buildSessionHeaders` + `extractCookie` + `SESSION_COOKIE_NAME`; reads the RAW Cookie header so the signed `connect.sid` is forwarded un-re-encoded); refactor `lib/auth.ts` to import from it (drop the private copies). Route `lib/data/customer.ts`'s `retrieveCustomer` (keep the `*orders` field expansion; switch to `cache: "no-store"`) and `updateCustomer` through `buildSessionHeaders`. No behavior change for JWT sessions; social `connect.sid` sessions now resolve. Per plan `docs/superpowers/plans/2026-06-11-customer-accounts-wave1.md` (Task 1).
+- **Dependencies**: INTEGRATION-06, INTEGRATION-06B
+- **Deliverables**: `src/lib/data/session-headers.ts` (new), `src/lib/auth.ts` (modified), `src/lib/data/customer.ts` (modified)
+- **Acceptance Criteria**: `retrieveCustomer()` returns the customer for a `connect.sid`-only session and `null` for a guest; `updateCustomer` persists under either credential; no cross-user caching (`no-store`); `npm run build` clean.
+
+### FRONTEND-26: Account nav popover
+
+- **Objective**: Replace the dead account icon (`TopNav.tsx:177`) with a working popover — social sign-in when signed out, account links when signed in.
+- **Requirements**: New `src/lib/account.ts` server action `getAccountMenuState()` → `{ name } | null` (display name only; no other PII to the client; mirrors `getSocialLoginPrefillName`). New `src/components/layout/AccountMenu.tsx` (`"use client"`): a `User`-icon button toggling a `role="menu"` popover — signed out → "Continue with Facebook"/"Continue with Google" anchors to `/store/auth/{facebook,google}?intent=account`; signed in → greeting + Account / Profile / Log out (logout via `<form action={logout}>`). A11y: `aria-haspopup` + `aria-expanded`, Escape + outside-click close. Add the `logout` server action to `lib/data/customer.ts` (best-effort `sdk.auth.logout()`, `removeAuthToken()`, expire the `connect.sid` cookie on this origin (`maxAge: -1`), revalidate the customers cache tag, `removeCartId()`, `redirect("/")` — replaces the starter's `signout`, whose `/${countryCode}/account` redirect 404s here) so the signed-in menu's Log out works; **defined here (first consumer) rather than in FRONTEND-27, since FRONTEND-27 depends on this task**. Known limitation: the backend session record lingers to TTL; cookie expiry makes it unreachable — a proxied server-side destroy is a Wave-2 hardening follow-up. Mount it in `TopNav.tsx` (replace the dead button) and add an "Account" row to the mobile drawer (the guard sends guests back to `/`). Ink only (accent reserved for sale price + KHQR); single hairline; no shadow/`dark:`. Per plan (Task 3).
+- **Dependencies**: FRONTEND-04, FRONTEND-25, BACKEND-11
+- **Deliverables**: `src/lib/account.ts` (new), `src/components/layout/AccountMenu.tsx` (new), `src/components/layout/TopNav.tsx` (modified), `src/lib/data/customer.ts` (modified — add `logout`)
+- **Acceptance Criteria**: Signed-out icon opens a popover with both providers (the Google href carries `intent=account`); signed-in shows account links + a working Log out; popover closes on Escape/outside-click; the mobile drawer has an Account row; layout holds at 360px; accent unused.
+
+### FRONTEND-27: Guarded account shell (home + logout)
+
+- **Objective**: A protected `/account` landing page with sign-out.
+- **Requirements**: New `src/app/account/layout.tsx` (Server Component): resolve `retrieveCustomer()`, `redirect("/")` for guests, render `TopNav` + an `AccountNav` sidebar + the page. New `src/components/account/AccountNav.tsx` (Account/Profile links + logout `<form>`). New `src/app/account/page.tsx` (greeting by name). `AccountNav`'s logout `<form action={logout}>` reuses the `logout` server action defined in FRONTEND-26 (`lib/data/customer.ts`) — import it, do not redefine it. Per plan (Task 4).
+- **Dependencies**: FRONTEND-25, FRONTEND-26
+- **Deliverables**: `src/app/account/layout.tsx` (new), `src/app/account/page.tsx` (new), `src/components/account/AccountNav.tsx` (new)
+- **Acceptance Criteria**: `/account` renders the signed-in customer's name; a guest hitting `/account` is redirected to `/`; Log out clears the session and returns home; `npm run build` clean.
+
+### FRONTEND-28: Account profile page
+
+- **Objective**: Let a signed-in customer edit their name and phone.
+- **Requirements**: New `src/lib/validation/phone.ts` (`CAMBODIA_PHONE_REGEX = /^(\+855|0)[1-9]\d{7,8}$/` + `isValidCambodiaPhone`, the PRD/security.md regex). New `src/components/account/ProfileForm.tsx` (`"use client"`): controlled first/last name + phone fields, read-only email (provider-supplied); validates phone with the shared regex before calling `updateCustomer`; shows saved/error states. New `src/app/account/profile/page.tsx` (reads the customer, renders `ProfileForm` prefilled). Tokens-only; pill inputs; ink button; accent unused. Per plan (Task 5).
+- **Dependencies**: FRONTEND-27 (the profile save path uses the session-aware `updateCustomer` from FRONTEND-25, reached transitively through FRONTEND-27)
+- **Deliverables**: `src/lib/validation/phone.ts` (new), `src/components/account/ProfileForm.tsx` (new), `src/app/account/profile/page.tsx` (new)
+- **Acceptance Criteria**: `/account/profile` prefills the customer's name/phone and shows email read-only; a valid edit persists via `updateCustomer`; an invalid phone is blocked with a message before any request; `npm run build` clean.
+
 ---
 
 ## Phase 4 — INTEGRATION
@@ -615,8 +657,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `next.config.js`
 - **Acceptance Criteria**: Product images load from `img.<domain>` as optimized responsive images.
 
-### INTEGRATION-10: Telegram alert end-to-end
+### ✅ INTEGRATION-10: Telegram alert end-to-end
 
+- **Completed 2026-06-12** — user-confirmed live UAT observation: a real test order produced a Telegram message in the operator's private chat with the configured fields (order #, line items + qty, total USD + ≈KHR, payment method, customer name, phone, address, note). Real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` now set in `backend/.env`, so the BACKEND-09 `order.placed` subscriber (`backend/src/subscribers/order-placed.ts`) sends instead of no-op'ing; it fires for both COD (BACKEND-04) and KHQR (BACKEND-03B) via `completeCartWorkflow`. Supersedes the earlier UAT deferral noted in TEST-03 (which had no dev send seam while secrets were empty).
 - **Objective**: Verify the notification path.
 - **Requirements**: Place a real test order → confirm subscriber posts to Telegram.
 - **Dependencies**: BACKEND-09, INTEGRATION-04
@@ -733,6 +776,14 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Dependencies**: BACKEND-03B, INTEGRATION-09
 - **Deliverables**: `tests/security.md` (checklist)
 - **Acceptance Criteria**: All checks pass; client-forged "paid" is rejected.
+
+### TEST-12: Account area E2E
+
+- **Objective**: Prove the account flow end-to-end against the real dev stack.
+- **Requirements**: New `storefront/tests/account.spec.ts` (Playwright), built on the `google-login.spec.ts` (TEST-08B) dev-mock seam — reuse its mock token server + helpers verbatim, drive the OAuth start with `?intent=account`, and assert the post-callback landing is `/account`. Tests: (1) signed-out icon popover shows both providers (the Google href carries `intent=account`); (2) a guest hitting `/account` redirects to `/`; (3) a completed login lands on `/account`, the home greets by name, and `/account/profile` prefills name + email (confirm `createCustomerAccountWorkflow` populates `first_name` from the full Google `name` claim rather than splitting it into first/last — if it splits, assert against the split form); (4) Log out clears the session (the menu shows providers again; `/account` re-guards). Serial; shares the `:4282` Google seam, so run targeted (`npx playwright test account.spec.ts`), not concurrently with `google-login.spec.ts`. Per plan `docs/superpowers/plans/2026-06-11-customer-accounts-wave1.md` (Task 6).
+- **Dependencies**: FRONTEND-25, FRONTEND-26, FRONTEND-27, FRONTEND-28, BACKEND-11, TEST-08B
+- **Deliverables**: `storefront/tests/account.spec.ts` (new)
+- **Acceptance Criteria**: `npx playwright test account.spec.ts` passes all four tests against the running dev stack with the Google dev-mock seam active.
 
 ---
 
