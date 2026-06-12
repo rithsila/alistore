@@ -125,4 +125,40 @@ The **Orders** and **Customers** routes call **`https://api.frankfurter.dev/v1/l
 | the low-stock list matches BACKEND-08B | **Yes** — both report exactly one low-stock variant: Sweatpants XL (`SWEATPANTS-XL`) = 0. |
 | the storefront build/bundle is unchanged | **Yes** — plugin is backend-only; no reference in `storefront/package.json`/lockfile; admin-UI deps never reach the storefront bundle. |
 
-**Open items carried to ANALYTICS-03 (owner UAT):** (a) the Customers tab surfaces customer name + email — confirm acceptable for the operator; (b) the Orders/Customers tabs' external FX call to `api.frankfurter.dev` — confirm production egress/CSP policy; (c) confirm the metrics the owner actually uses (daily/weekly sales, low stock for reorder) and record the re-vet-before-bump upgrade policy.
+**Open items carried to ANALYTICS-03 (owner UAT):** (a) the Customers tab surfaces customer name + email — confirm acceptable for the operator; (b) the Orders/Customers tabs' external FX call to `api.frankfurter.dev` — confirm production egress/CSP policy; (c) confirm the metrics the owner actually uses (daily/weekly sales, low stock for reorder) and record the re-vet-before-bump upgrade policy. **→ All three resolved in §6 below.**
+
+---
+
+## 6. Owner UAT sign-off (ANALYTICS-03)
+
+**Signed off:** 2026-06-12 by the shop owner, based on the ANALYTICS-02 live verification (§1–§5) walked through on the real Medusa Admin.
+
+**Outcome: ✅ ACCEPTED for daily use.** The owner accepts the Agilo Analytics dashboard for daily operation.
+
+### Metrics the owner actually uses — present & correct
+- **Daily / weekly sales:** the **Orders** tab covers this — Total Sales + Total Orders KPIs, Sales-Over-Time and Orders-Over-Time lines, with date-range presets (This Month / custom). Figures reconcile to the cent with `GET /admin/reports/sales` (BACKEND-08) — see §2.
+- **Low stock for reorder:** the **Products** tab "Low Stock Variants" surfaces reorder candidates (e.g. Sweatpants XL `SWEATPANTS-XL` = 0), matching `GET /admin/reports/stock` (BACKEND-08B) — see §2.
+
+### Open items — owner decisions
+| Item (from §5 / §3) | Owner decision |
+|---|---|
+| (a) Customers tab shows customer **name + email** (no phone/address), admin-only | **Acceptable.** Single-operator admin; name + email is fine. No phone/address is exposed, so the `security.md` "no phone/address" criterion holds. |
+| (b) Orders/Customers tabs call **`https://api.frankfurter.dev/v1/latest`** for FX (no allowlist, no SSRF guard; hard-coded vendor URL, Redis-cached) | **Allowlist `api.frankfurter.dev`** for outbound backend egress in production (CSP `connect-src` / egress policy). Treat the FX path as **best-effort** — moot today since USD is the store default (conversion factor 1.0), but the allowlist keeps the Orders/Customers tabs from failing an uncached load if a future CSP blocks arbitrary outbound hosts. Re-evaluate on any plugin bump. |
+| Plugin `options` | **Default `{}`** — no options configured (as registered in ANALYTICS-01: `plugins: [{ resolve: "@agilo/medusa-analytics-plugin", options: {} }]`). |
+
+### Pinned version & upgrade policy (locked)
+- **Pinned version:** `@agilo/medusa-analytics-plugin@1.4.0` — **exact pin** in `backend/package.json` (`.npmrc save-exact=true`), lockfile committed; install with `npm ci`.
+- **Upgrade policy — do NOT auto-upgrade.** No `^`/`~` ranges; the version is frozen at `1.4.0`. Any version bump is a deliberate, gated change that **MUST re-run the full `SETUP-01B` supply-chain pass before merge**:
+  1. `npm audit --production` — fail on `high`+ (no new high/critical advisories vs. the documented baseline in `docs/npm-audit-exceptions.md`).
+  2. Semgrep (CI-on-PR gate per `security.md`).
+  3. Manual skim of the new runtime deps + the transitive lockfile diff (watch for any new **backend/network/crypto** dep — current footprint is admin-UI/charting only).
+  4. Re-confirm the plugin still registers **no `/store/*` route** and does **not** bump any `@medusajs/*` off the pinned `2.15.3`.
+  5. Re-run the ANALYTICS-02 render + reconciliation + auth checks (§1–§3) and re-confirm the external FX egress surface (item b) hasn't widened.
+- **Phase 9 stays v2-deferred** — this sign-off accepts the plugin as installed and locks its version; no further analytics work ships until v2 begins.
+
+### Acceptance criteria — result
+| Criterion (verbatim) | Result |
+|---|---|
+| owner signs off | **Yes** — accepted for daily use 2026-06-12 (sales + reorder metrics confirmed present and correct; PII and FX-egress items decided). |
+| pinned version recorded | **Yes** — `@agilo/medusa-analytics-plugin@1.4.0`, exact-pinned, lockfile committed, `npm ci` only. |
+| the re-vet-before-bump upgrade policy is documented | **Yes** — no auto-upgrade; any bump re-runs the full `SETUP-01B` supply-chain pass (5 steps above) before merge. |

@@ -1016,8 +1016,9 @@ Derived from `PRD.md` (rev 2) and `nike-DESIGN.md`. Tasks are small (≤30 min e
 - **Deliverables**: `docs/analytics-integration-guide.md` (screens checked, reconciliation result, auth check) — no source changes expected
 - **Acceptance Criteria**: every tab/widget renders inside an admin-authed session; an unauthenticated request to the Analytics routes is rejected; plugin Total Sales reconciles with BACKEND-08 for the same period/currency; the low-stock list matches BACKEND-08B; the storefront build/bundle is unchanged.
 
-### ANALYTICS-03: Owner UAT sign-off (human-gated)
+### ✅ ANALYTICS-03: Owner UAT sign-off (human-gated)
 
+- _Completed 2026-06-12 — Owner signed off live on the Agilo Analytics dashboard (accepted for daily use), based on the ANALYTICS-02 verification. Captured the three carried-over decisions: (a) Customers tab name+email = **acceptable** (admin-only, no phone/address); (b) FX egress to `api.frankfurter.dev` = **allowlist in prod**, best-effort; (c) plugin `options` = **default `{}`**. Locked pinned version `@agilo/medusa-analytics-plugin@1.4.0` (exact, `npm ci`) with a **no-auto-upgrade** policy requiring the full 5-step `SETUP-01B` supply-chain re-vet on any bump. Sign-off notes appended as §6 of `docs/analytics-integration-guide.md` — no source changes. Phase 9 stays v2-deferred._
 - **Objective**: Owner accepts the dashboard for daily use and the version is locked (mirrors KHPAY-06 / PAYWAY-08).
 - **Requirements**: Walk the owner through the dashboard on the real admin; confirm the metrics they actually use (daily/weekly sales, low stock for reorder) are present and correct. Record the pinned version and an **upgrade policy**: do not auto-upgrade — re-run the `SETUP-01B` supply-chain checks on any version bump. Decide whether any plugin `options` are needed (default `{}`).
 - **Dependencies**: ANALYTICS-02
