@@ -12,6 +12,7 @@ import {
 import Chip from "../ui/Chip"
 import CurrencyFlag from "../ui/CurrencyFlag"
 import NavSearch from "./NavSearch"
+import AccountMenu from "./AccountMenu"
 import { useCartCount } from "@lib/hooks/use-cart-count"
 import { useCurrency } from "@lib/currency-context"
 import type { Currency } from "@lib/price"
@@ -174,9 +175,7 @@ export default function TopNav() {
         <div className="hidden items-center gap-4 min-[600px]:flex">
           <CurrencyToggle currency={currency} onChange={setCurrency} />
           <NavSearch />
-          <button type="button" aria-label="Account" className={ICON_BUTTON}>
-            <User className="h-6 w-6" />
-          </button>
+          <AccountMenu />
           <BagLink count={itemCount} />
         </div>
 
@@ -228,6 +227,15 @@ export default function TopNav() {
               <MagnifyingGlass className="h-5 w-5" />
               Search
             </Link>
+
+            <a
+              href="/account"
+              onClick={closeDrawer}
+              className="flex items-center gap-2 py-3 text-base font-medium leading-normal text-ink"
+            >
+              <User className="h-5 w-5" />
+              Account
+            </a>
 
             <ul className="flex flex-col">
               {NAV_LINKS.map((link) => (
