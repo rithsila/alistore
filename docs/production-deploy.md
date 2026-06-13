@@ -6,7 +6,8 @@ This is the deploy runbook for the **KHPAY-enabled** configuration:
 - **Medusa backend** on the **Proxmox VM in Cambodia** (`alistore-backend`, 172.16.18.20)
 - **Postgres + Redis** on the **current Proxmox box** (`alistore-db`, 172.16.18.10)
 - **Payments:** KHQR via **KHPAY** (the active rail) + Cash-on-Delivery
-- **Backend exposure:** Cloudflare **quick tunnel** (no domain yet)
+- **Backend exposure:** **Tailscale Funnel** (stable public HTTPS, no domain needed)
+- **Admin access:** `/app` behind **MFA** on the Funnel URL; **Tailscale mesh** (MikroTik subnet router) for private SSH/DB/management
 
 It is the production-leaning sibling of [`uat-deploy.md`](./uat-deploy.md). That doc
 is COD-only and explains the topology, the per-machine commands, and the
@@ -26,16 +27,25 @@ detail** — this file is the same flow with the KHPAY + exposure deltas called 
 | Database | Current Proxmox Postgres (`172.16.18.10`) | No migration; reuse the dev DB + publishable key |
 | Backend host | Proxmox LXC `172.16.18.20` | Same as `uat-deploy.md` Phase 1 |
 | Payments | **KHPAY KHQR** enabled (+ COD) | Configure `KHPAY_*`; add a paid-flip smoke test |
-| Public exposure | **Cloudflare quick tunnel** | No domain → no trusted TLS for a bare public IP; the tunnel provides HTTPS |
+| Public exposure | **Tailscale Funnel** (backend box) | Stable public `*.ts.net` HTTPS for Vercel — no domain, no URL churn |
+| Admin access | `/app` behind **MFA** + **Tailscale mesh** (MikroTik subnet router) | Funnel publishes all of Medusa; MFA gates `/app`. Mesh = private SSH/DB/mgmt path |
 
-**Why the quick tunnel even though you have a public IP:** Vercel's servers call
-the backend **server-side over the public internet**, and with KHQR payments that
-hop **must be HTTPS with a valid cert**. Vercel's Node `fetch` rejects self-signed
-certs, and you can't get a trusted (Let's Encrypt) cert for a *bare IP* — you need
-a hostname. Until a domain exists, the Cloudflare quick tunnel is the HTTPS edge.
-**KHPAY is polling-only (no inbound webhook)**, so nothing external needs to reach
-your IP — the tunnel is sufficient. When a domain lands, switch to the public IP +
-Caddy (see the last section).
+**Why Tailscale Funnel:** Vercel's servers call the backend **server-side over the
+public internet**, and with KHQR payments that hop **must be HTTPS with a valid
+cert**. Vercel's Node `fetch` rejects self-signed certs, and you can't get a
+trusted (Let's Encrypt) cert for a *bare IP* — you need a hostname. **Tailscale
+Funnel** gives the backend box a stable, publicly-resolvable
+`https://alistore-backend.<tailnet>.ts.net` name with a valid TLS cert, reachable
+from anywhere (including Vercel) — and unlike a Cloudflare quick tunnel the URL
+**never churns**. **KHPAY is polling-only (no inbound webhook)**, so nothing else
+needs to reach your IP.
+
+**Why a mesh too:** the **MikroTik runs Tailscale as a subnet router** (advertising
+`172.16.18.0/24`), giving your own devices a **private** path to the DB box, SSH,
+and the backend with no public exposure. Funnel publishes the whole Medusa server,
+so `/app` is reachable publicly **behind MFA**; if you later want `/app` fully off
+the public internet, front it with Caddy (see the admin-isolation note in Layer 2).
+The mesh stays regardless.
 
 ---
 
@@ -44,7 +54,7 @@ Caddy (see the last section).
 | Gate | Why |
 |------|-----|
 | **`NODE_ENV=production`** in the backend `.env` | Disables every dev-only loopback escape (Bakong/FB/Google/KHPAY mock seams) and turns on the production SSRF boot-check. |
-| **Admin MFA (TOTP) + ≥16-char password** before the tunnel goes public | The tunnel exposes `/app` (admin) to the internet. With a quick tunnel you cannot path-restrict, so MFA is your only control. |
+| **Admin MFA (TOTP) + ≥16-char password** | Funnel publishes the whole backend, so `/app` is reachable publicly — **MFA is the access control**. Non-negotiable before sharing any URL. |
 | **Real secrets only in `.env` on the VM** | Never in git, never in the Vercel repo. |
 | **Real `KHPAY_BASE_URL` only** (`https://khpay.site/api/v1`) | It's SSRF-allowlisted to `khpay.site` and validated at boot; a wrong host refuses to start. |
 | **Never set `KHPAY_DEV_ALLOW_LOOPBACK` in prod** | `NODE_ENV=production` makes it inert anyway, but leave it unset. |
@@ -110,11 +120,11 @@ REDIS_URL=redis://:<pwd>@172.16.18.10:6379
 JWT_SECRET=                    # openssl rand -base64 48
 COOKIE_SECRET=                 # openssl rand -base64 48
 
-# --- CORS / origins (fill the real hosts after Phases 3 + 5, then pm2 restart) ---
+# --- CORS / origins (fill the real Vercel host after the Vercel step, then restart) ---
 STORE_CORS=https://<your>.vercel.app
-ADMIN_CORS=https://<random>.trycloudflare.com
-AUTH_CORS=https://<random>.trycloudflare.com,https://<your>.vercel.app
-TRUSTED_PROXY_COUNT=1          # Cloudflare tunnel = 1 proxy hop
+ADMIN_CORS=https://alistore-backend.<tailnet>.ts.net          # admin over the tailnet
+AUTH_CORS=https://alistore-backend.<tailnet>.ts.net,https://<your>.vercel.app
+TRUSTED_PROXY_COUNT=1          # Tailscale Funnel = 1 proxy hop in front
 
 # --- R2 product images (copy your working dev values) ---
 S3_FILE_URL=https://pub-1dedea628ee74e9399932493df26e28e.r2.dev
@@ -160,34 +170,61 @@ modules loading, not "a fake redis instance will be used"):
 cd /opt/alistore/backend/.medusa/server && npm run start
 ```
 
-### Tunnel + process manager
+### Process manager + Tailscale exposure
 
-Install `cloudflared` (`uat-deploy.md` Phase 3), then start everything from the
-committed PM2 ecosystem file (it runs **both** the backend and the quick tunnel):
+Start the backend under PM2 (the ecosystem file runs **only** the Medusa server —
+Tailscale handles exposure, not PM2):
 
 ```bash
 npm install -g pm2
 cd /opt/alistore/backend
 pm2 start deploy/ecosystem.config.cjs
-pm2 logs alistore-tunnel        # read the https://<random>.trycloudflare.com URL
 pm2 save                        # remember the process list
 pm2 startup                     # run the printed line → survives VM reboot
 ```
 
-### Admin user + MFA (before sharing any URL)
+Install Tailscale and expose the box:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --hostname=alistore-backend       # open the auth URL, approve in the admin console
+
+# Public, stable HTTPS for Vercel (valid .ts.net cert, so Secure cookies work):
+tailscale funnel --bg 9000
+```
+
+> **First enable it for your tailnet** in the admin console: DNS → **enable HTTPS
+> certificates**; Access controls → add the **`funnel`** node attribute. Confirm
+> with `tailscale funnel status`.
+
+Your stable public backend URL is `https://alistore-backend.<tailnet>.ts.net`.
+
+> **Admin-isolation note.** `tailscale funnel --bg 9000` publishes the *whole*
+> Medusa server, so `/app` is reachable publicly **behind MFA** (the same control
+> the old quick tunnel relied on — now with a stable URL and no third party).
+> That's the posture this runbook uses. If you later want `/app` **off** the public
+> internet entirely, front Medusa with a small **Caddy** reverse proxy that funnels
+> only `/store/*` (deny `/app` + `/admin`) and reach the admin privately over the
+> mesh — more moving parts, stronger posture. The **MikroTik subnet-router mesh**
+> already gives you a private path to the box for SSH/DB either way.
+
+### Admin user + MFA
 
 ```bash
 cd /opt/alistore/backend
 npx medusa user -e you@alistore.com -p '<strong 16+ char password>'
 ```
 
-Open `…/app` at the tunnel URL, log in, and **enable TOTP MFA** in account
-settings (Medusa v2.15.3). The admin is now internet-facing — do not skip this.
+Open `https://alistore-backend.<tailnet>.ts.net/app`, log in, and **enable TOTP
+MFA** in account settings (Medusa v2.15.3) **before you share anything** — the
+Funnel makes `/app` reachable publicly, so MFA is the gate. (For private-only admin,
+front Medusa with Caddy and reach it over the mesh — see Layer 2's admin-isolation
+note.)
 
-Then backfill the real tunnel URL into `ADMIN_CORS` / `AUTH_CORS`:
+The `.ts.net` host is stable, so `ADMIN_CORS` / `AUTH_CORS` (already set to it in
+the `.env` block above) never change. After any `.env` edit:
 
 ```bash
-# edit /opt/alistore/backend/.env, then:
 cp .env .medusa/server/.env
 pm2 restart alistore-backend
 ```
@@ -201,7 +238,7 @@ pm2 restart alistore-backend
 
 | Key | Value |
 |-----|-------|
-| `MEDUSA_BACKEND_URL` | the `https://<random>.trycloudflare.com` URL (Phase 3) |
+| `MEDUSA_BACKEND_URL` | `https://alistore-backend.<tailnet>.ts.net` (stable Funnel URL) |
 | `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | `pk_a39b79c7bafef5ce3adcf5a6a35faa42f686ffaf55ef7fcce2322e12f3c6b989` |
 | `NEXT_PUBLIC_BASE_URL` | `https://<your>.vercel.app` *(set after first deploy, then redeploy)* |
 | `NEXT_PUBLIC_DEFAULT_REGION` | `kh` |
@@ -237,7 +274,7 @@ Server-Action origins already match. Product images load from R2 (allow-listed i
 
 ## Operating notes
 
-- **Logs:** `pm2 logs alistore-backend` · `pm2 logs alistore-tunnel`
+- **Logs / exposure:** `pm2 logs alistore-backend` · `tailscale status` · `tailscale funnel status`
 - **Restart after an `.env` change:** edit `.env` → `cp .env .medusa/server/.env`
   → `pm2 restart alistore-backend`
 - **Update to new code:**
@@ -251,23 +288,25 @@ Server-Action origins already match. Product images load from R2 (allow-listed i
 - **DB backup before any migration:** on the DB box,
   `sudo -u postgres pg_dump medusa > /root/medusa-backup-$(date +%F).sql`
 
-### The quick-tunnel tax
+### No more URL churn
 
-Every time `cloudflared` restarts it mints a **new** URL. PM2 auto-restarts the
-tunnel, so this *will* happen. On each change you must:
+The Funnel hostname `https://alistore-backend.<tailnet>.ts.net` is **stable across
+reboots** — Tailscale persists the serve/funnel config in the `tailscaled` service.
+Set `MEDUSA_BACKEND_URL` in Vercel and `ADMIN_CORS`/`AUTH_CORS` in the backend
+`.env` **once**; they don't change. (This is the main win over the old Cloudflare
+quick tunnel, whose URL rotated on every `cloudflared` restart.) Inspect exposure
+any time with `tailscale status` and `tailscale funnel status`.
 
-1. Update `MEDUSA_BACKEND_URL` in Vercel → redeploy.
-2. Update `ADMIN_CORS` / `AUTH_CORS` in the backend `.env` → `cp .env
-   .medusa/server/.env` → `pm2 restart alistore-backend`.
+### When you get a domain (optional — your own hostname instead of `*.ts.net`)
 
-### When you get a domain (the real fix — uses your public IP)
-
-This removes the URL churn entirely and finally uses your public IP:
+Tailscale Funnel already gives you a stable HTTPS URL, so a domain is now optional.
+If you want your own hostname on the public hop:
 
 1. Point `api.<domain>` (A record) at your public IP.
 2. Run **Caddy** on the backend box for automatic Let's Encrypt TLS →
-   `localhost:9000` (or use a Cloudflare **named** tunnel / proxied A record with a
-   Cloudflare Access policy on `/app` for the strongest posture).
-3. Delete the `alistore-tunnel` PM2 app from `deploy/ecosystem.config.cjs`.
-4. Set `MEDUSA_BACKEND_URL=https://api.<domain>` in Vercel **once** (stable forever).
-5. Switch R2 to `img.<domain>` (`S3_FILE_URL` + `next.config.js` host) once DNS exists.
+   `localhost:9000`, replacing the Funnel as the public edge.
+3. Set `MEDUSA_BACKEND_URL=https://api.<domain>` in Vercel **once**.
+4. Switch R2 to `img.<domain>` (`S3_FILE_URL` + `next.config.js` host) once DNS exists.
+
+The **MikroTik subnet-router mesh stays** either way — it's your private admin/SSH
+path, independent of how the public `/store` hop is served.

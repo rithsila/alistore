@@ -1,19 +1,23 @@
 /**
- * PM2 process definitions for the Ali Store UAT backend on the Proxmox VM.
- * See docs/uat-deploy.md (Phase 4). Run from /opt/alistore/backend:
+ * PM2 process definitions for the Ali Store backend on the Proxmox LXC.
+ * See docs/backend-proxmox-lxc-setup.md (Step 8) and docs/production-deploy.md.
+ * Run from /opt/alistore/backend:
  *
  *   pm2 start deploy/ecosystem.config.cjs
- *   pm2 logs alistore-tunnel     # read the trycloudflare URL (quick tunnel)
  *   pm2 save && pm2 startup      # survive VM reboot
  *
- * Two processes:
+ * One process:
  *   - alistore-backend : the built Medusa server (`medusa start`) from
  *                        .medusa/server, serving the store API + admin (/app)
  *                        on localhost:9000. It reads .medusa/server/.env.
- *   - alistore-tunnel  : cloudflared quick tunnel exposing :9000 publicly.
- *                        Swap for a named tunnel once you own a Cloudflare
- *                        domain (then this entry can be removed / replaced —
- *                        see docs/uat-deploy.md Phase 3).
+ *
+ * Public exposure is handled by **Tailscale**, NOT PM2:
+ *   - `tailscale serve`  → admin (/app) private over the tailnet (valid TLS).
+ *   - `tailscale funnel` → /store/* public for Vercel at a STABLE
+ *                          https://alistore-backend.<tailnet>.ts.net URL.
+ * Tailscale persists this config in the tailscaled service across reboots, so
+ * there is no tunnel process to babysit here (this replaced the old cloudflared
+ * quick tunnel — see docs/backend-proxmox-lxc-setup.md Step 9).
  */
 
 const path = require("path")
@@ -33,17 +37,6 @@ module.exports = {
       max_restarts: 10,
       // Medusa boots Postgres/Redis connections + the admin build; give it room.
       kill_timeout: 10000,
-    },
-    {
-      name: "alistore-tunnel",
-      script: "cloudflared",
-      // `interpreter: none` → run the binary directly, not via node.
-      interpreter: "none",
-      args: "tunnel --url http://localhost:9000",
-      autorestart: true,
-      // A restart mints a NEW quick-tunnel URL — update Vercel MEDUSA_BACKEND_URL
-      // and the backend CORS when that happens (docs/uat-deploy.md, Operating notes).
-      max_restarts: 10,
     },
   ],
 }

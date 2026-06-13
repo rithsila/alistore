@@ -1,8 +1,8 @@
-# UAT deploy — Vercel storefront + Medusa on Proxmox, via Cloudflare Tunnel
+# UAT deploy — Vercel storefront + Medusa on Proxmox, via Tailscale Funnel
 
 This is the runbook for a **real UAT round**: the storefront on **Vercel**, the
-Medusa backend on the **Proxmox VM in Cambodia**, made reachable through a
-**Cloudflare Tunnel**. This mirrors the final production topology, runs the
+Medusa backend on the **Proxmox VM in Cambodia**, made reachable through
+**Tailscale Funnel**. This mirrors the final production topology, runs the
 production builds (not `dev` mode), and is on the actual Cambodia network — so it
 finally exercises the items the plan deferred "to UAT with real credentials"
 (Telegram alerts, KHQR, admin MFA).
@@ -27,7 +27,7 @@ login, so there is **no OAuth / redirect-URI / provider-console work** here.
                                     │  middleware proxy for /store/auth + invoice)
                                     ▼
                     ┌─────────────────────────────────────────────┐
-                    │  Cloudflare Tunnel  (cloudflared)           │  https://<random>.trycloudflare.com
+                    │  Tailscale Funnel  (tailscaled)             │  https://alistore-backend.<tailnet>.ts.net
                     └───────────────┬─────────────────────────────┘
                                     │  http://localhost:9000
                                     ▼
@@ -41,12 +41,12 @@ login, so there is **no OAuth / redirect-URI / provider-console work** here.
                               └───────────────────────────┘   docs/postgres-proxmox-lxc-setup.md)
 ```
 
-**Why only the backend gets a tunnel:** the storefront was traced end-to-end —
+**Why only the backend is exposed:** the storefront was traced end-to-end —
 every cart / payment / customer call runs **server-side** (`"use server"`,
 Server Components), and the only browser→backend hops (`/store/auth/*`, invoice)
 are **same-origin-proxied** by `storefront/src/middleware.ts`. The browser never
-calls `:9000` directly. So Vercel gives the storefront a free public URL, and the
-tunnel exists purely so Vercel's *servers* (and you, for the admin panel) can
+calls `:9000` directly. So Vercel gives the storefront a free public URL, and
+Funnel exists purely so Vercel's *servers* (and you, for the admin panel) can
 reach the backend.
 
 **The DB/Redis box (`172.16.18.10`) is already done** in
@@ -61,16 +61,17 @@ DB box instead, but a separate container keeps the DB isolated — and the exist
 
 | Gate | Why | Where |
 |------|-----|-------|
-| **Enable admin MFA** before the tunnel goes up | The tunnel exposes `/app` (admin) to the internet. `security.md` requires MFA on admin; SETUP-01C deferred it. An unprotected admin on the public internet is the single biggest risk here. | Phase 4 |
+| **Enable admin MFA** before you share the URL | Funnel exposes `/app` (admin) to the internet. `security.md` requires MFA on admin; SETUP-01C deferred it. An unprotected admin on the public internet is the single biggest risk here. | Phase 4 |
 | **Strong admin password** (≥16 chars, mixed) | Same reason. | Phase 4 |
 | **`NODE_ENV=production`** in the backend `.env` | Disables the dev-only loopback escapes (Bakong/FB/Google mock seams) and turns on the production SSRF boot-check. | Phase 2 |
 | **Real secrets only in `.env` on the VM** | Never in git, never in the Vercel repo. | Phases 2 & 5 |
 | **Leave `BAKONG_*` unset** for this COD round | In production, setting `BAKONG_PROXY_URL` **without** `BAKONG_PROXY_ALLOWED_HOSTS` makes the backend refuse to boot (by design). COD needs neither. | Phase 2 |
 
-> **Stronger option for admin:** if you create a Cloudflare **named** tunnel
-> (Phase 3, alternative), put a **Cloudflare Access** policy on the hostname so
-> `/app`, `/admin`, and `/auth/user` require your login before anything reaches
-> Medusa. With the quick tunnel you cannot path-restrict, so MFA is your control.
+> **Stronger option for admin:** to take `/app` off the public internet, front
+> Medusa with a small **Caddy** reverse proxy that funnels only `/store/*`, and
+> reach the admin privately over the **Tailscale mesh** (the MikroTik subnet
+> router). Funnel alone can't path-restrict a single Medusa port, so with the plain
+> setup MFA is your control.
 
 ---
 
@@ -132,14 +133,14 @@ JWT_SECRET=        # ← `openssl rand -base64 48`
 COOKIE_SECRET=     # ← `openssl rand -base64 48`
 
 # --- CORS / origins ---
-# Fill the tunnel + Vercel hosts AFTER Phases 3 and 5 (revisit this file then).
-# Browser never hits the backend directly, but the admin panel does (same-origin
-# on the tunnel host) and Medusa validates these.
-STORE_CORS=https://alistore.vercel.app                                  # ← change (Phase 5)
-ADMIN_CORS=https://REPLACE.trycloudflare.com                            # ← change (Phase 3)
-AUTH_CORS=https://REPLACE.trycloudflare.com,https://alistore.vercel.app # ← change (Phases 3+5)
+# Fill the Vercel host AFTER Phase 5. The Funnel host (Phase 3) is stable, so the
+# admin/auth origins below don't churn. Browser never hits the backend directly,
+# but the admin panel does (same-origin on the Funnel host) and Medusa validates these.
+STORE_CORS=https://alistore.vercel.app                                          # ← change (Phase 5)
+ADMIN_CORS=https://alistore-backend.<tailnet>.ts.net                            # ← change (Phase 3)
+AUTH_CORS=https://alistore-backend.<tailnet>.ts.net,https://alistore.vercel.app # ← change (Phases 3+5)
 
-# Cloudflare Tunnel = 1 proxy hop in front → trust it for the real client IP
+# Tailscale Funnel = 1 proxy hop in front → trust it for the real client IP
 TRUSTED_PROXY_COUNT=1
 
 # --- R2 product images (copy your working dev values) ---
@@ -190,63 +191,53 @@ instance will be used"). Ctrl-C — Phase 4 runs it for real under a process man
 
 ---
 
-## Phase 3 — Cloudflare Tunnel (public URL for the backend)
+## Phase 3 — Tailscale Funnel (public URL for the backend)
 
-Install `cloudflared` on the backend box:
+> **Mesh prerequisite.** Your **MikroTik runs Tailscale as a subnet router**
+> advertising `172.16.18.0/24` — that's your private path to this box (SSH, the DB
+> box, the backend) from your own devices. Funnel below is only the *public* hop
+> Vercel needs.
 
-```bash
-curl -L -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-chmod +x /usr/local/bin/cloudflared
-cloudflared --version
-```
-
-**Quick tunnel (no domain needed — use this now):**
+Install Tailscale on the backend box and join the tailnet:
 
 ```bash
-cloudflared tunnel --url http://localhost:9000
-# prints:  https://<random-words>.trycloudflare.com   ← copy this URL
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --hostname=alistore-backend      # open the auth URL, approve in the admin console
 ```
 
-That URL is your **public backend URL**. It stays valid **as long as the
-process runs** (Phase 4 keeps it alive). Put it into the backend `.env`
-(`ADMIN_CORS`, `AUTH_CORS`) and the Vercel env (`MEDUSA_BACKEND_URL`, Phase 5).
+**One-time tailnet setup** (Tailscale admin console):
+1. **DNS → enable HTTPS certificates** (issues this box's `*.ts.net` TLS cert).
+2. **Access controls → add the `funnel` node attribute** for this machine.
 
-> **Stability tax (important):** a quick tunnel gets a **new random URL every
-> time `cloudflared` restarts**. A restart means you must update the backend
-> `.env` CORS + the Vercel `MEDUSA_BACKEND_URL` and redeploy. For anything beyond
-> a short UAT, register a **named** tunnel against a domain on Cloudflare so the
-> backend gets a stable host like `https://api.alistore.com` (and you can add a
-> Cloudflare Access policy to protect `/app`). Named tunnels need a domain — the
-> one item still pending (CLARIFY-08-REOPEN).
-
-**Named tunnel (later, once you own a Cloudflare domain):**
+Expose the backend publicly (stable HTTPS, background, survives reboot):
 
 ```bash
-cloudflared tunnel login
-cloudflared tunnel create alistore-backend
-cloudflared tunnel route dns alistore-backend api.alistore.com   # ← your domain
-# ingress config → ~/.cloudflared/config.yml :
-#   tunnel: <tunnel-id>
-#   credentials-file: /root/.cloudflared/<tunnel-id>.json
-#   ingress:
-#     - hostname: api.alistore.com
-#       service: http://localhost:9000
-#     - service: http_status:404
-cloudflared tunnel run alistore-backend
+tailscale funnel --bg 9000
+tailscale funnel status          # confirm https://alistore-backend.<tailnet>.ts.net → 127.0.0.1:9000
 ```
+
+That `*.ts.net` URL is your **public backend URL** — and unlike a quick tunnel it
+**never changes**. Put it into the backend `.env` (`ADMIN_CORS`, `AUTH_CORS`) and
+the Vercel env (`MEDUSA_BACKEND_URL`, Phase 5), once.
+
+> **Admin exposure (Simple posture).** Funnel publishes the whole Medusa server, so
+> `/app` is reachable on that public URL **behind MFA** (Phase 4 makes MFA
+> mandatory). To take `/app` fully off the public internet, front Medusa with a
+> small **Caddy** reverse proxy that funnels only `/store/*` and reach admin
+> privately over the mesh.
 
 ---
 
 ## Phase 4 — Keep it alive (PM2) + enable admin MFA
 
-Install PM2 and start both the backend and the tunnel from the committed
-ecosystem file (`backend/deploy/ecosystem.config.cjs`):
+Install PM2 and start the backend from the committed ecosystem file
+(`backend/deploy/ecosystem.config.cjs` — one process; Tailscale from Phase 3
+handles exposure, not PM2):
 
 ```bash
 npm install -g pm2
 cd /opt/alistore/backend
 pm2 start deploy/ecosystem.config.cjs
-pm2 logs alistore-tunnel        # ← read the trycloudflare URL from here if you used a quick tunnel
 pm2 save                        # remember the process list
 pm2 startup                     # run the line it prints → survives VM reboot
 ```
@@ -258,12 +249,13 @@ cd /opt/alistore/backend
 npx medusa user -e you@alistore.com -p '<a strong 16+ char password>'   # ← change
 ```
 
-Then open the admin at the tunnel URL `…/app`, log in, and **enable two-factor
-authentication** in your account settings (Medusa v2.15.3 has TOTP MFA — scan
-with an authenticator app). Do not skip this: the admin is now internet-facing.
+Then open the admin at `https://alistore-backend.<tailnet>.ts.net/app`, log in, and
+**enable two-factor authentication** in your account settings (Medusa v2.15.3 has
+TOTP MFA — scan with an authenticator app). Do not skip this: the Funnel makes the
+admin internet-facing, so MFA is your access control.
 
-> Revisit `/opt/alistore/backend/.env` and `.medusa/server/.env` now that you
-> have the real tunnel URL — set `ADMIN_CORS` / `AUTH_CORS`, then
+> The Funnel host is stable, so set `ADMIN_CORS` / `AUTH_CORS` in
+> `/opt/alistore/backend/.env` (and `cp .env .medusa/server/.env`) **once**, then
 > `pm2 restart alistore-backend`.
 
 ---
@@ -280,7 +272,7 @@ The Vercel project points at the **`storefront/`** subdirectory of the repo.
 
    | Key | Value |
    |-----|-------|
-   | `MEDUSA_BACKEND_URL` | `https://<random>.trycloudflare.com` *(the Phase 3 URL)* |
+   | `MEDUSA_BACKEND_URL` | `https://alistore-backend.<tailnet>.ts.net` *(the stable Phase 3 Funnel URL)* |
    | `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | `pk_a39b79c7bafef5ce3adcf5a6a35faa42f686ffaf55ef7fcce2322e12f3c6b989` *(the SETUP-10 key — valid because UAT uses the same DB)* |
    | `NEXT_PUBLIC_BASE_URL` | `https://alistore.vercel.app` *(set after first deploy reveals the URL, then redeploy)* |
    | `NEXT_PUBLIC_DEFAULT_REGION` | `kh` |
@@ -316,18 +308,19 @@ On a phone, on cellular (not your LAN), against the Vercel URL:
 **Deferred to a later round (not in this COD UAT):** real KHQR paid-flip (needs
 the in-Cambodia Bakong proxy + `BAKONG_PROXY_ALLOWED_HOSTS`), Facebook/Google
 login (needs real apps + redirect URIs on the Vercel origin), and the
-domain-dependent pieces (named tunnel `api.<domain>`, `img.<domain>`, SETUP-11).
+domain-dependent pieces (custom `api.<domain>`, `img.<domain>`, SETUP-11).
 
 ---
 
 ## Operating notes
 
-- **Logs:** `pm2 logs alistore-backend` · `pm2 logs alistore-tunnel`
+- **Logs / exposure:** `pm2 logs alistore-backend` · `tailscale status` ·
+  `tailscale funnel status`
 - **Restart backend after an `.env` change:** `pm2 restart alistore-backend`
 - **Update to new code:** `cd /opt/alistore/backend && git pull && npm ci &&
   npx medusa build && npx medusa db:migrate && cp .env .medusa/server/.env &&
   (cd .medusa/server && npm ci --omit=dev) && pm2 restart alistore-backend`
-- **Quick-tunnel URL changed?** Update `MEDUSA_BACKEND_URL` in Vercel (redeploy)
-  **and** `ADMIN_CORS`/`AUTH_CORS` in the backend `.env` (`pm2 restart`).
+- **Stable URL:** the `*.ts.net` Funnel host doesn't churn across reboots — set
+  `MEDUSA_BACKEND_URL` (Vercel) and `ADMIN_CORS`/`AUTH_CORS` (backend `.env`) once.
 - **DB backup before any migration:** on the DB box,
   `sudo -u postgres pg_dump medusa > /root/medusa-backup-$(date +%F).sql`

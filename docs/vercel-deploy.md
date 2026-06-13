@@ -5,8 +5,8 @@ on **Vercel**. It is derived from reading the actual storefront config, not a
 generic template — every env var, setting, and gotcha below was traced to a real
 line of code (paths cited inline).
 
-For the **backend** side (Medusa on the Proxmox VM, made public via a Cloudflare
-Tunnel) and the end-to-end UAT topology, see [`docs/uat-deploy.md`](./uat-deploy.md).
+For the **backend** side (Medusa on the Proxmox VM, made public via Tailscale
+Funnel) and the end-to-end UAT topology, see [`docs/uat-deploy.md`](./uat-deploy.md).
 This guide covers only the Vercel half and references that runbook where the two
 meet (the backend URL and CORS).
 
@@ -26,7 +26,7 @@ injects the publishable key.
   Customer phone ──► https://<your-app>.vercel.app   (Vercel: SSR + middleware proxy)
                               │  server-side only
                               ▼
-                     https://api.<domain>   (public HTTPS backend — Cloudflare Tunnel)
+          https://alistore-backend.<tailnet>.ts.net   (public HTTPS backend — Tailscale Funnel)
                               │
                      Medusa :9000  →  Postgres / Redis / R2 / Bakong / Telegram
 ```
@@ -46,8 +46,8 @@ Two consequences that drive everything below:
 
 ## 1 — Prerequisites
 
-- [ ] **A public HTTPS backend URL** — e.g. `https://<random>.trycloudflare.com`
-      (quick tunnel) or `https://api.alistore.com` (named tunnel). From
+- [ ] **A public HTTPS backend URL** — e.g.
+      `https://alistore-backend.<tailnet>.ts.net` (Tailscale Funnel). From
       [`docs/uat-deploy.md`](./uat-deploy.md) Phase 3.
 - [ ] **A store publishable key** — `pk_…`, from the backend's Sales Channel
       (Medusa admin → Settings → API Key Management → Publishable keys, or the
@@ -240,8 +240,9 @@ These do not block a deploy but are worth knowing / fixing:
 - **Code change:** push to the connected branch → Vercel auto-builds and deploys.
 - **Env change:** edit in Vercel → **trigger a redeploy** (client vars are
   build-time; server vars are injected per deployment).
-- **Backend URL changed** (e.g. a quick tunnel restarted with a new
-  `*.trycloudflare.com`): update `MEDUSA_BACKEND_URL` in Vercel **and** the
-  backend's `STORE_CORS`/`AUTH_CORS`, then redeploy both. For stability, use a
-  **named** Cloudflare tunnel (`api.<domain>`) so the URL never changes — see
+- **Backend URL changed:** the Tailscale Funnel host
+  (`https://alistore-backend.<tailnet>.ts.net`) is **stable across reboots**, so
+  this should be rare. If you do move it (e.g. switch to a custom `api.<domain>`),
+  update `MEDUSA_BACKEND_URL` in Vercel **and** the backend's
+  `STORE_CORS`/`AUTH_CORS`, then redeploy both — see
   [`docs/uat-deploy.md`](./uat-deploy.md) Phase 3.
