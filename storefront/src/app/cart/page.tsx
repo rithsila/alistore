@@ -17,6 +17,7 @@ import {
 import { emitCartChanged } from "@lib/cart-events"
 import { formatPrice } from "@lib/price"
 import { useCurrency } from "@lib/currency-context"
+import { DELIVERY_FEE, FREE_DELIVERY_THRESHOLD } from "@lib/delivery"
 
 /**
  * Cart ("bag") page (FRONTEND-15; cart operations INTEGRATION-02) — route `/cart`.
@@ -47,10 +48,6 @@ import { useCurrency } from "@lib/currency-context"
  * settings (`DELIVERY_FEE` / `FREE_DELIVERY_THRESHOLD`, BACKEND-01) is wired with
  * the checkout flow (INTEGRATION-04).
  */
-
-// CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
-const DELIVERY_FEE = 1.5
-const FREE_DELIVERY_THRESHOLD = 50
 
 const MIN_QUANTITY = 1
 

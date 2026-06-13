@@ -16,6 +16,7 @@ import { placeCodOrder, prepareKhqrCheckout } from "@lib/checkout"
 import { getCart, type Cart } from "@lib/cart"
 import { formatPrice } from "@lib/price"
 import { useCurrency } from "@lib/currency-context"
+import { DELIVERY_FEE, FREE_DELIVERY_THRESHOLD } from "@lib/delivery"
 
 /**
  * Checkout page (FRONTEND-16) — route `/checkout`.
@@ -57,10 +58,6 @@ import { useCurrency } from "@lib/currency-context"
  * completed OAuth round-trip. Both share the same session/prefill path — the
  * session is read server-side by `@lib/auth` (`getSocialLoginPrefillName`).
  */
-
-// CLARIFY-04 (locked): flat delivery fee $1.50, free once subtotal ≥ $50.
-const DELIVERY_FEE = 1.5
-const FREE_DELIVERY_THRESHOLD = 50
 
 type PaymentMethod = "khqr" | "cod"
 

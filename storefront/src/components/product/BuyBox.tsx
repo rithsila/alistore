@@ -2,6 +2,7 @@
 
 import { Scan } from "@medusajs/icons"
 
+import { FREE_DELIVERY_THRESHOLD } from "@lib/delivery"
 import PillButton from "../ui/PillButton"
 import Price from "../ui/Price"
 
@@ -42,9 +43,6 @@ interface BuyBoxProps {
 }
 
 const PRICE_TYPE = "text-2xl font-medium leading-normal"
-
-// CLARIFY-04 (locked): free delivery once the subtotal reaches $50 (USD base).
-const FREE_DELIVERY_THRESHOLD = 50
 
 // Outline accent CTA: same geometry as PillButton, accent border + text.
 const KHQR_BUTTON =

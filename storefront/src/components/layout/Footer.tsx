@@ -24,14 +24,16 @@ import Link from "next/link"
  *
  * Presentational Server Component — no client interactivity. Columns are a
  * 2-up grid on mobile (standard clothing-store mobile footer — avoids a tall
- * 1-up stack) widening to 4-up at ≥1024. Links use
- * placeholder `/` hrefs (real Help/Delivery routes and the Telegram/Facebook
- * channel URLs are not wired yet), consistent with TopNav's placeholder nav.
+ * 1-up stack) widening to 4-up at ≥1024. The FAQ, Delivery Info, Returns, and
+ * Size Guide links route to their info pages (`/faq`, `/delivery`, `/returns`,
+ * `/size-guide`); Telegram/Facebook are external URLs. Track Order remains a
+ * placeholder `/` link pending its own page (v2 — needs account/order lookup).
  */
 
 interface FooterLink {
   label: string
   href: string
+  external?: boolean
 }
 
 interface FooterColumn {
@@ -43,26 +45,35 @@ const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     heading: "Help",
     links: [
-      { label: "FAQ", href: "/" },
-      { label: "Contact Us", href: "/" },
-      { label: "Size Guide", href: "/" },
+      { label: "FAQ", href: "/faq" },
+      { label: "Contact Us", href: "https://t.me/doung_seyha", external: true },
+      { label: "Size Guide", href: "/size-guide" },
     ],
   },
   {
     heading: "Delivery",
     links: [
-      { label: "Delivery Info", href: "/" },
+      { label: "Delivery Info", href: "/delivery" },
       { label: "Track Order", href: "/" },
-      { label: "Returns", href: "/" },
+      { label: "Returns", href: "/returns" },
     ],
   },
   {
     heading: "Telegram",
-    links: [{ label: "Chat on Telegram", href: "/" }],
+    links: [
+      { label: "Channel", href: "https://t.me/olympicclothes", external: true },
+      { label: "Group", href: "https://t.me/SeyhaOLP", external: true },
+    ],
   },
   {
     heading: "Facebook",
-    links: [{ label: "Visit Facebook", href: "/" }],
+    links: [
+      {
+        label: "Visit Facebook",
+        href: "https://www.facebook.com/profile.php?id=100070835905482",
+        external: true,
+      },
+    ],
   },
 ]
 
@@ -88,6 +99,9 @@ export default function Footer() {
                     <Link
                       href={link.href}
                       className="text-sm font-medium leading-normal text-mute transition-opacity hover:opacity-70"
+                      {...(link.external
+                        ? { target: "_blank", rel: "noopener noreferrer" }
+                        : {})}
                     >
                       {link.label}
                     </Link>

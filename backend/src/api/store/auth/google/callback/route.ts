@@ -39,6 +39,7 @@
  * rate-limited 10/min per client IP.
  */
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import { overLimitAtomic } from "../../../../../lib/rate-limit"
 import type { Logger } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { createCustomerAccountWorkflow } from "@medusajs/medusa/core-flows"
@@ -117,14 +118,29 @@ const CALLBACK_PATH = "/store/auth/google/callback"
 const DEV_DEFAULT_REDIRECT_URI = `http://localhost:9000${CALLBACK_PATH}`
 
 /**
- * Where to send the browser after a successful login (INTEGRATION-06B; mirrors
- * the Facebook callback). Relative + hard-coded (security.md: redirect targets
- * come from a hard-coded allowlist, never echoed client input — no
- * `?next=`/`?return_to=`). Through the storefront's `/store/auth/*` proxy this
- * resolves to `<storefront-origin>/checkout`, where `@lib/auth` reads this
- * session and prefills the form.
+ * Post-login return paths (BACKEND-11; mirrors the Facebook callback). The start
+ * route (BACKEND-05C) stored a `return_to` in the single-use state entry,
+ * resolved from an optional `?intent=` against this same hard-coded allowlist.
+ * The callback re-validates the stored value here (defense in depth) before
+ * using it as the terminal redirect — an absent/unrecognized value falls back to
+ * `/checkout`, the unchanged default. Relative + hard-coded (security.md:
+ * redirect targets come from a hard-coded allowlist, never echoed client input —
+ * no `?next=`/`?return_to=`). Through the storefront's `/store/auth/*` proxy each
+ * resolves to `<storefront-origin>` + the path, where `@lib/auth` reads this
+ * session.
  */
-const STOREFRONT_RETURN_PATH = "/checkout"
+const RETURN_PATHS = { checkout: "/checkout", account: "/account" } as const
+const DEFAULT_RETURN_PATH = RETURN_PATHS.checkout
+const ALLOWED_RETURN_PATHS: ReadonlySet<string> = new Set(
+  Object.values(RETURN_PATHS)
+)
+
+/** Re-validate the state-stored return path against the hard-coded allowlist. */
+function resolveReturnPath(stored: unknown): string {
+  return typeof stored === "string" && ALLOWED_RETURN_PATHS.has(stored)
+    ? stored
+    : DEFAULT_RETURN_PATH
+}
 
 /** Redis key prefix BACKEND-05C stored the live `state` under. */
 function stateKey(state: string): string {
@@ -234,18 +250,16 @@ function fail(
 
 /** Increment one fixed-window counter; returns true when already over limit. */
 async function overLimit(
-  cache: CacheModule,
+  _cache: CacheModule,
   keyPrefix: string,
   windowMs: number,
   limit: number,
   ttl: number
 ): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / windowMs)
-  const key = `${keyPrefix}:${bucket}`
-  const current = (await cache.get<number>(key)) ?? 0
-  if (current >= limit) return true
-  await cache.set(key, current + 1, ttl)
-  return false
+  // C-02 fix: atomic fixed-window counter (Redis INCR in prod, race-free
+  // in-process fallback in dev). `_cache` is retained for call-site
+  // compatibility but no longer used. See src/lib/rate-limit.ts.
+  return overLimitAtomic(keyPrefix, windowMs, limit, ttl)
 }
 
 /**
@@ -393,10 +407,12 @@ export async function GET(
 
   // 1) CSRF: query state must equal the browser cookie AND a live Redis entry.
   const cookieState = readCookie(req, STATE_COOKIE)
-  const storedState = await cache.get<unknown>(stateKey(state))
+  const storedState = await cache.get<{ return_to?: unknown }>(stateKey(state))
   if (!cookieState || cookieState !== state || storedState === null) {
     return fail(res, 401, "invalid_state", requestId)
   }
+  // Post-login return path the start route stashed in the (now verified) state.
+  const returnTo = resolveReturnPath(storedState.return_to)
   // Consume (single-use) + clear the binding cookie.
   await cache.set(stateKey(state), null, 1).catch(() => undefined)
   res.clearCookie(STATE_COOKIE, { path: CALLBACK_PATH })
@@ -542,8 +558,10 @@ export async function GET(
   }
 
   // Session established (HttpOnly connect.sid) — no tokens in the response.
-  // Return the browser to checkout (INTEGRATION-06B); the storefront reads this
-  // session and prefills the form. Relative + hard-coded redirect (security.md:
-  // no open redirect, no echoed return target).
-  res.redirect(302, STOREFRONT_RETURN_PATH)
+  // Return the browser to the intent-selected path carried by the single-use
+  // state (BACKEND-11): `/account` when login began with `?intent=account`, else
+  // `/checkout` (the unchanged default). The target was re-validated against the
+  // hard-coded allowlist above (security.md: no open redirect, no echoed return
+  // target); the storefront reads this session and prefills the form.
+  res.redirect(302, returnTo)
 }

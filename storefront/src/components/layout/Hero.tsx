@@ -1,4 +1,4 @@
-import PillButton from "../ui/PillButton"
+import Link from "next/link"
 
 /**
  * Editorial campaign hero band (DESIGN.md campaign-tile / FRONTEND-08).
@@ -44,7 +44,12 @@ export default function Hero({
           </h1>
         </div>
 
-        <PillButton>Shop now</PillButton>
+        <Link
+          href="/"
+          className="inline-flex h-12 items-center justify-center rounded-pill bg-ink px-6 py-3 text-base font-medium leading-normal text-canvas transition-opacity hover:opacity-90"
+        >
+          Shop now
+        </Link>
       </div>
     </section>
   )

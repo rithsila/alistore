@@ -240,4 +240,15 @@ module.exports = defineConfig({
     // for its customer_social_identity table are generated/applied in SETUP-08.
     { resolve: "./src/modules/social-identity" },
   ],
+  // Admin analytics dashboard (ANALYTICS-01, owner-approved 2026-06-12). The
+  // Agilo plugin injects admin-only Analytics pages + Orders/Products/Customers
+  // list widgets, computing its metrics from Medusa core order/inventory data.
+  // Admin-UI footprint only — its runtime deps (recharts, luxon, radix, etc.)
+  // ship into the Medusa Admin build, never the Next.js storefront bundle. It
+  // registers no public /store/* route. Requires the Caching Module (Redis,
+  // SETUP-03). Pinned exact 1.4.0; re-run the SETUP-01B supply-chain pass on any
+  // bump. Does not replace BACKEND-08/08B programmatic reports.
+  plugins: [
+    { resolve: "@agilo/medusa-analytics-plugin", options: {} },
+  ],
 })

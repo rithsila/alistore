@@ -4,29 +4,25 @@ import { sdk } from "@lib/config"
 import medusaError from "@lib/util/medusa-error"
 import { HttpTypes } from "@medusajs/types"
 import { revalidateTag } from "next/cache"
+import { cookies as nextCookies } from "next/headers"
 import { redirect } from "next/navigation"
 import {
   getAuthHeaders,
-  getCacheOptions,
   getCacheTag,
   getCartId,
   removeAuthToken,
   removeCartId,
   setAuthToken,
 } from "./cookies"
+import { buildSessionHeaders } from "./session-headers"
 
 export const retrieveCustomer =
   async (): Promise<HttpTypes.StoreCustomer | null> => {
-    const authHeaders = await getAuthHeaders()
+    const headers = await buildSessionHeaders()
 
-    if (!authHeaders) return null
-
-    const headers = {
-      ...authHeaders,
-    }
-
-    const next = {
-      ...(await getCacheOptions("customers")),
+    // No credential at all → guest; skip the round-trip.
+    if (!headers["authorization"] && !headers["cookie"]) {
+      return null
     }
 
     return await sdk.client
@@ -36,17 +32,14 @@ export const retrieveCustomer =
           fields: "*orders",
         },
         headers,
-        next,
-        cache: "force-cache",
+        cache: "no-store",
       })
       .then(({ customer }) => customer)
       .catch(() => null)
   }
 
 export const updateCustomer = async (body: HttpTypes.StoreUpdateCustomer) => {
-  const headers = {
-    ...(await getAuthHeaders()),
-  }
+  const headers = await buildSessionHeaders()
 
   const updateRes = await sdk.store.customer
     .update(body, {}, headers)
@@ -127,20 +120,37 @@ export async function login(_currentState: unknown, formData: FormData) {
   }
 }
 
-export async function signout(countryCode: string) {
-  await sdk.auth.logout()
+/**
+ * Sign the customer out. Clears the starter JWT and expires the social
+ * `connect.sid` session cookie on this origin, then revalidates the customer
+ * cache and returns home.
+ *
+ * Replaces the starter's `signout` (which redirected to `/${countryCode}/account`,
+ * a 404 in this flat-routed storefront). Defined here — FRONTEND-26 is its first
+ * consumer (the account nav popover's Log out), ahead of FRONTEND-27's AccountNav.
+ *
+ * Known limitation (Wave 2 hardening): the backend express-session record lingers
+ * until its TTL; expiring the cookie makes it unreachable from the browser, which
+ * is sufficient for v1. A proxied server-side session destroy is a follow-up.
+ */
+export async function logout() {
+  try {
+    await sdk.auth.logout()
+  } catch {
+    // No JWT session (social login) — nothing to revoke server-side here.
+  }
 
   await removeAuthToken()
+
+  const cookieStore = await nextCookies()
+  cookieStore.set("connect.sid", "", { maxAge: -1, path: "/" })
 
   const customerCacheTag = await getCacheTag("customers")
   revalidateTag(customerCacheTag)
 
   await removeCartId()
 
-  const cartCacheTag = await getCacheTag("carts")
-  revalidateTag(cartCacheTag)
-
-  redirect(`/${countryCode}/account`)
+  redirect("/")
 }
 
 export async function transferCart() {

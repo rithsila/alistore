@@ -30,6 +30,7 @@
  *  - Rate limit 10/min per client IP.
  */
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import { overLimitAtomic } from "../../../../lib/rate-limit"
 import type { Logger } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { randomBytes, randomUUID } from "crypto"
@@ -63,6 +64,27 @@ const STATE_COOKIE = "_google_oauth_state"
 
 /** Rate limit (security.md): 10/min per client IP. */
 const IP_RATE_LIMIT = { windowMs: 60_000, limit: 10, ttl: 60 } as const
+
+/**
+ * Optional `?intent=` → post-login return path (BACKEND-11). Hard-coded
+ * allowlist: the redirect target is server-derived and rides the single-use
+ * state entry, never echoed client input (security.md). The resolved path is
+ * stored in the Redis state entry and re-validated by the callback (05D).
+ * Absent or unknown intent falls back to `/checkout` — the unchanged default.
+ */
+const RETURN_PATHS = { checkout: "/checkout", account: "/account" } as const
+type ReturnIntent = keyof typeof RETURN_PATHS
+const DEFAULT_RETURN_INTENT: ReturnIntent = "checkout"
+
+/** Narrow an arbitrary query value to a known intent key. */
+function isReturnIntent(value: unknown): value is ReturnIntent {
+  return value === "checkout" || value === "account"
+}
+
+/** Resolve the optional intent query to its hard-coded return path. */
+function resolveReturnTo(intent: unknown): string {
+  return RETURN_PATHS[isReturnIntent(intent) ? intent : DEFAULT_RETURN_INTENT]
+}
 
 type CacheModule = {
   get<T>(key: string): Promise<T | null>
@@ -116,18 +138,16 @@ function fail(
 
 /** Increment one fixed-window counter; returns true when already over limit. */
 async function overLimit(
-  cache: CacheModule,
+  _cache: CacheModule,
   keyPrefix: string,
   windowMs: number,
   limit: number,
   ttl: number
 ): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / windowMs)
-  const key = `${keyPrefix}:${bucket}`
-  const current = (await cache.get<number>(key)) ?? 0
-  if (current >= limit) return true
-  await cache.set(key, current + 1, ttl)
-  return false
+  // C-02 fix: atomic fixed-window counter (Redis INCR in prod, race-free
+  // in-process fallback in dev). `_cache` is retained for call-site
+  // compatibility but no longer used. See src/lib/rate-limit.ts.
+  return overLimitAtomic(keyPrefix, windowMs, limit, ttl)
 }
 
 /** Per-IP (10/min) fixed-window rate limit. */
@@ -202,10 +222,17 @@ export async function GET(
   }
 
   // Server-generated, single-use state (≥128-bit). Stored in Redis (presence =
-  // valid) and mirrored into a session cookie so 05D can bind + verify.
+  // valid) and mirrored into a session cookie so 05D can bind + verify. The
+  // intent-resolved return path rides the state entry (BACKEND-11) so the
+  // callback never trusts a client-supplied redirect target.
   const state = randomBytes(32).toString("base64url")
+  const returnTo = resolveReturnTo(req.query.intent)
   const cache = req.scope.resolve(Modules.CACHE) as CacheModule
-  await cache.set(stateKey(state), { issued_at: Date.now() }, STATE_TTL_SECONDS)
+  await cache.set(
+    stateKey(state),
+    { issued_at: Date.now(), return_to: returnTo },
+    STATE_TTL_SECONDS
+  )
 
   // SameSite=Lax so the cookie survives Google's top-level redirect back to the
   // callback; Secure off only for the localhost dev default (http).
