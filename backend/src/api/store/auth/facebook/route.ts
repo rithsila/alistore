@@ -25,6 +25,7 @@
  *  - Rate limit 10/min per client IP.
  */
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import { overLimitAtomic } from "../../../../lib/rate-limit"
 import type { Logger } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { randomBytes, randomUUID } from "crypto"
@@ -135,18 +136,16 @@ function fail(
 
 /** Increment one fixed-window counter; returns true when already over limit. */
 async function overLimit(
-  cache: CacheModule,
+  _cache: CacheModule,
   keyPrefix: string,
   windowMs: number,
   limit: number,
   ttl: number
 ): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / windowMs)
-  const key = `${keyPrefix}:${bucket}`
-  const current = (await cache.get<number>(key)) ?? 0
-  if (current >= limit) return true
-  await cache.set(key, current + 1, ttl)
-  return false
+  // C-02 fix: atomic fixed-window counter (Redis INCR in prod, race-free
+  // in-process fallback in dev). `_cache` is retained for call-site
+  // compatibility but no longer used. See src/lib/rate-limit.ts.
+  return overLimitAtomic(keyPrefix, windowMs, limit, ttl)
 }
 
 /** Per-IP (10/min) fixed-window rate limit. */

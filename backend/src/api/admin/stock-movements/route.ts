@@ -24,7 +24,8 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 import type { Logger } from "@medusajs/framework/types"
-import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import { overLimitAtomic } from "../../../lib/rate-limit"
 import { updateInventoryLevelsWorkflow } from "@medusajs/medusa/core-flows"
 import { randomUUID } from "crypto"
 import { z } from "zod"
@@ -73,11 +74,6 @@ const VARIANT_FIELDS = [
   "inventory_items.inventory.location_levels.stocked_quantity",
 ]
 
-type CacheModule = {
-  get<T>(key: string): Promise<T | null>
-  set(key: string, data: unknown, ttl?: number): Promise<void>
-}
-
 /** Coerce a Medusa BigNumberValue (number | string | { numeric }) to number. */
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -108,13 +104,13 @@ async function isRateLimited(
   req: AuthenticatedMedusaRequest,
   actorId: string
 ): Promise<boolean> {
-  const cache = req.scope.resolve(Modules.CACHE) as CacheModule
-  const bucket = Math.floor(Date.now() / ADMIN_RATE_LIMIT.windowMs)
-  const key = `rl:admin:stock-movements:${actorId}:${bucket}`
-  const current = (await cache.get<number>(key)) ?? 0
-  if (current >= ADMIN_RATE_LIMIT.limit) return true
-  await cache.set(key, current + 1, ADMIN_RATE_LIMIT.ttl)
-  return false
+  // C-02 fix: atomic fixed-window counter; see src/lib/rate-limit.ts.
+  return overLimitAtomic(
+    `rl:admin:stock-movements:${actorId}`,
+    ADMIN_RATE_LIMIT.windowMs,
+    ADMIN_RATE_LIMIT.limit,
+    ADMIN_RATE_LIMIT.ttl
+  )
 }
 
 /** Resolve the target absolute stocked quantity for the given movement type. */
