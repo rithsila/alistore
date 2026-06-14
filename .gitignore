@@ -57,3 +57,5 @@ sandbox/credential_info.txt
 
 # Playwright run artifacts
 test-results/
+.vercel
+.env*
